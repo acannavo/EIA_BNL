@@ -1,0 +1,28 @@
+# ==========================================================================
+#  Literature data used in the comparison figures (hard-coded in plot_collapse_v2
+#  and plot_eia_powerLaw_test).
+# ==========================================================================
+
+[poirier_2023_sn]
+label           = "Sn, Poirier 2023"
+species_mass_amu = 118.71
+intensity_Wcm2  = 8.0e10       # 97 mJ, 27 um droplet, 10 ns
+z               = [2, 3, 4, 5, 6]
+E_slow_eV       = [161.7126, 391.63338, 655.00824, 989.54906, 1814.34423]
+z_fast          = [3, 4, 5, 6]
+E_fast_eV       = [1654.98115, 1796.09655, 1804.00388, 1819.81854]
+velocity_const_kms_per_sqrt_eV = 1.275   # sqrt(2 e / m_Sn)
+
+[kondrashev_2006_nb]
+label           = "Nb, Kondrashev 2006"
+species_mass_amu = 92.906
+intensity_Wcm2  = 1.0e11
+z               = [1, 2, 3, 4, 5, 6]
+E_slow_keV      = [0.48344, 0.98105, 1.50898, 2.03514, 2.56129, 3.01075]
+E_fast_keV      = [4.50537, 4.17898, 4.86922, 5.23307, 5.23307, 5.42391]
+velocity_const_kms = 439.0     # u = 439 sqrt(E[keV] / A)
+
+[sheil_2024_sn]
+label   = "Sheil et al., PRL 133, 125101 (Sn)"
+zbar_prefactor = 0.3           # zbar = 0.3 E^0.4, E in eV
+zbar_exponent  = 0.4

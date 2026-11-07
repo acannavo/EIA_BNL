@@ -17,6 +17,7 @@ Code only. Raw data, processed results and figures are **not** in the repository
 
 ```
 src/eiakit/        package
+db/                database of the experimental conditions (TOML, version-controlled)
 tests/             pytest tests
 env.ps1            environment script (PowerShell)
 pyproject.toml     package metadata and dependencies
@@ -47,6 +48,27 @@ Folders whose name is a canonical name plus `~`, `_`, `_0`, `_b`, ... (for examp
 `Output~`, `EIA-Results_`) or that contain `wrong` are temporary copies with wrong
 results and are ignored. Other folders (`Miscellaneous`, `LowStateCharge`,
 `4_MultiShotSameSpot`, ...) are listed but not used.
+
+## Database (`db/`)
+
+All experiment-dependent values live here; the code contains no paths and no
+physical constants.
+
+| File | Content |
+|---|---|
+| `constants.toml` | physical constants by profile: `corrected` (CODATA 2018, default) and the `legacy_*` profiles that reproduce exactly what each legacy script used |
+| `species.toml` | ion species: mass [amu], mass labels used in the legacy files |
+| `instruments.toml` | EIA (flight path, analyzer radii, time zero), Faraday cup (distance, aperture, load), acquisition file formats |
+| `runs.toml` | one entry per run, **keyed by the data folder name** (`20250623`, `2026_1103 Nb analysis`): target, laser, instruments, file format, legacy settings |
+| `pipeline.toml` | default parameters of the processing stages |
+| `literature.toml` | literature data used in the comparison figures |
+| `studies/*.toml` | cross-run comparisons (runs, layout, exclusions) |
+
+Values that are assumptions are listed in `provisional` (e.g. the FC aperture of
+the 2026_1103 run). When the real value is known, change it in the database and
+re-run the calibration and the stages after it.
+
+`EIA_DB_ROOT` can point to another database folder (default: `db/` of the repository).
 
 ## Setup (Windows, VS Code)
 
@@ -79,6 +101,10 @@ eiakit checksum [--root DIR] [--out FILE] [--skip-variants]
                                      SHA-256 manifest of a tree (default: data root,
                                      written to processed\_manifests)
 eiakit checksum-compare A.csv B.csv  compare two manifests
+eiakit runs [--all]                  runs and their conditions (--all: also runs not analysed)
+eiakit db-check                      validate the database
+eiakit import-exclusions FILE [--study PRL_AlNb]
+                                     convert a legacy ExclusionList.txt to the study's [exclude] table
 ```
 
 Checking that `data\` is an exact copy of the original tree:

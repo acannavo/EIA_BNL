@@ -1,0 +1,73 @@
+# ==========================================================================
+#  Instrument configurations and acquisition (file-format) profiles.
+#
+#  A run refers to one EIA, one FC and one acquisition profile by name.
+#  Values marked in `provisional` are assumptions to be confirmed: when the
+#  real value is known, change it here and re-run the calibration stage and
+#  everything downstream (the pipeline marks them stale).
+# ==========================================================================
+
+# ---- Energy Ion Analyzer (electrostatic analyzer + SEM) ------------------
+#  E/q = U / ln(R_out/R_in)        (analyzer law, untitled28)
+#  t   = L / sqrt(2 z e (E/q) / m)
+
+[eia.EIA_2025]
+description = "2025 campaign (Al, Nb), ns laser"
+L_m         = 3.85            # flight path target -> SEM; untitled28: LOF = 3.86 - 0.01
+R_out       = 102.5           # analyzer electrode radii (only the ratio matters)
+R_in        = 97.5
+R_orbit_m   = 0.1             # orbit radius used in untitled28 TOF() (cancels in E/q)
+t0_s        = 0.0             # trigger / time-zero offset (unknown, not corrected; TODO s4)
+provisional = ["t0_s"]
+
+[eia.EIA_2026_ps]
+description = "2026_1103 Nb run, ps laser, shorter flight path"
+L_m         = 1.22
+R_out       = 102.5
+R_in        = 97.5
+R_orbit_m   = 0.1
+t0_s        = 0.0
+provisional = ["t0_s"]
+
+# ---- Faraday cup ---------------------------------------------------------
+
+[fc.FC_2025]
+description        = "2025 campaign"
+L_m                = 2.38
+aperture_radius_cm = 0.50
+R_load_ohm         = 51.0
+provisional        = []
+
+[fc.FC_2026_ps]
+description        = "2026_1103 Nb run. Aperture differs from 2025 but is not known yet: 0.50 cm assumed"
+L_m                = 0.58
+aperture_radius_cm = 0.50
+R_load_ohm         = 51.0     # confirmed same as 2025
+provisional        = ["aperture_radius_cm"]
+
+# ---- Acquisition / file formats --------------------------------------------
+#  sem.filename_regex  named groups: int, dec (optional), rep  ->  U = float("int.dec"), repeat = rep
+#  sem.header          "skiprows:<n>" (fixed header length)  or  "detect:TIME" (line starting with TIME)
+#  sem.time_column / sem.signal_column : column name, or 0-based index when the file has no usable header
+
+[acquisition.scope_2025]
+description         = "2025 SEM exports <i>p<j>v<k>.csv, FC exports *.csv"
+sem.filename_regex  = '^(?P<int>\d+)(?:p(?P<dec>\d+))?v(?P<rep>\d+)\.csv$'
+sem.header          = "skiprows:22"
+sem.time_column     = 0
+sem.signal_column   = 1
+fc.glob             = "*.csv"
+fc.header           = "skiprows:20"
+fc.time_column      = "TIME"
+fc.signal_column    = "CH2"
+
+[acquisition.scope_2026_mdo]
+description         = "2026 Tektronix MDO exports <NNN>p<D>Data<k>.csv (only *Data*.csv), FC <name>Data<k>.csv"
+sem.filename_regex  = '^(?P<int>\d+)p(?P<dec>\d+)Data(?P<rep>\d+)\.csv$'
+sem.header          = "detect:TIME"
+sem.time_column     = "TIME"
+sem.signal_column   = "CH3"
+fc.glob             = "*Data*.csv"
+fc.header           = "skiprows:20"
+fc.time_column      = "TIME"
+fc.signal_column    = "CH2"

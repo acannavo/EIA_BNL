@@ -1,0 +1,40 @@
+# ==========================================================================
+#  Ion species.
+#
+#  mass_amu     mass in atomic mass units (the value used by the analysis)
+#  data_labels  value(s) of the 'm' column in the legacy EIA peak files.
+#               The 2025 pipeline made them with int(m) (truncation: Al -> 26,
+#               O -> 15); the 2026_1103 pipeline with round(m) (Nb -> 93).
+#  file_label   number in the legacy CBS file names CBS_fit_results_<label>_<El>.txt
+#               (round(mass)); a run can override it (runs.toml).
+# ==========================================================================
+
+[species.Al]
+name        = "aluminium"
+mass_amu    = 26.9815
+data_labels = [26, 27]
+file_label  = 27
+
+[species.Nb]
+name        = "niobium"
+mass_amu    = 92.906
+data_labels = [92, 93]
+file_label  = 92
+
+[species.H]
+name        = "hydrogen"
+mass_amu    = 1.008
+data_labels = [1]
+file_label  = 1
+
+[species.C]
+name        = "carbon"
+mass_amu    = 12.01
+data_labels = [12]
+file_label  = 12
+
+[species.O]
+name        = "oxygen"
+mass_amu    = 15.99
+data_labels = [15, 16]
+file_label  = 16

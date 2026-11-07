@@ -5,6 +5,10 @@ Command line entry point:  ``eiakit <command>``
     eiakit checksum [--root DIR] [--out FILE] [--skip-variants]
                                     SHA-256 manifest of a tree (default: the data root)
     eiakit checksum-compare A B     compare two manifests (exit code 1 if they differ)
+    eiakit runs [--all]             runs of the database with their conditions
+    eiakit db-check                 validate the database (exit code 1 on errors)
+    eiakit import-exclusions FILE [--study NAME]
+                                    legacy ExclusionList.txt -> the study's [exclude] table
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ from pathlib import Path
 
 from . import __version__
 from .checksum import build_manifest, compare_manifests, read_manifest, write_manifest
+from .db import DatabaseError, format_exclude_toml, import_exclusion_list, load_database
 from .layout import discover_runs
 from .paths import PathsNotConfigured, get_paths
 
@@ -89,6 +94,68 @@ def cmd_checksum_compare(args) -> int:
     return 0 if d.identical else 1
 
 
+def _fmt(v, f="{:g}"):
+    return "-" if v is None else f.format(v)
+
+
+def cmd_runs(args) -> int:
+    db = load_database()
+    try:
+        data_root = get_paths().data
+    except PathsNotConfigured:
+        data_root = None
+    hdr = (f"{'key':<24}{'label':<22}{'tgt':<4}{'laser':<20}{'L_EIA':>6}{'L_FC':>6}"
+           f"{'r_FC':>6}  {'acquisition':<15}{'folder':<7} provisional / notes")
+    print(hdr)
+    print("-" * len(hdr))
+    for r in db.runs(include_only=not args.all):
+        exists = "-" if data_root is None else ("ok" if r.folder(data_root).is_dir() else "MISSING")
+        if not r.include:
+            print(f"{r.key:<24}{r.label[:21]:<22}{'':<4}{'(not analysed)':<20}{'':>18}  {'':<15}"
+                  f"{exists:<7} {r.notes}")
+            continue
+        las = r.laser
+        laser = " ".join(x for x in (
+            las.pulse or "",
+            f"{las.energy_mJ:g} mJ" if las.energy_mJ else "",
+            f"{'~' if las.approximate else ''}{las.intensity_Wcm2:.0e} W/cm2"
+            if las.intensity_Wcm2 else "") if x) or "-"
+        prov = ", ".join(r.provisional)
+        print(f"{r.key:<24}{r.label:<22}{r.target:<4}{laser:<20}{r.eia.L_m:>6.2f}{r.fc.L_m:>6.2f}"
+              f"{r.fc.aperture_radius_cm:>6.2f}  {r.rec.acquisition:<15}{exists:<7} {prov}")
+    print()
+    print("Ion mass of the target per constants profile [kg]:")
+    for sp in sorted({r.target for r in db.runs()}):
+        line = "  ".join(f"{p}={db.mass_kg(sp, p):.6e}" for p in db.constants.profiles)
+        ratio = db.mass_kg(sp, "corrected") / db.mass_kg(sp, "legacy_proton")
+        print(f"  {sp:<3} {line}   corrected/legacy_proton = {ratio:.5f}")
+    print(f"\nStudies: {', '.join(sorted(db.studies)) or '-'}   (database: {db.root})")
+    return 0
+
+
+def cmd_db_check(_args) -> int:
+    db = load_database(strict=False)
+    errors = db.check()
+    n_inc = len(db.runs())
+    print(f"database {db.root}: {len(db.run_keys)} runs ({n_inc} included), "
+          f"{len(db.species)} species, {len(db.instruments.eia)} EIA / {len(db.instruments.fc)} FC "
+          f"configurations, {len(db.constants.profiles)} constants profiles, "
+          f"{len(db.studies)} studies")
+    for e in errors:
+        print(f"  ERROR: {e}")
+    print("RESULT:", "OK" if not errors else f"{len(errors)} error(s)")
+    return 0 if not errors else 1
+
+
+def cmd_import_exclusions(args) -> int:
+    db = load_database()
+    excl = import_exclusion_list(Path(args.file), db, args.study)
+    print(f"# from {args.file}  ->  replace the [exclude] table at the end of "
+          f"db/studies/{args.study}.toml with:\n")
+    print(format_exclude_toml(excl))
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="eiakit", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -104,10 +171,18 @@ def main(argv=None) -> int:
     p.add_argument("a")
     p.add_argument("b")
     p.set_defaults(func=cmd_checksum_compare)
+    p = sub.add_parser("runs", help="runs of the database")
+    p.add_argument("--all", action="store_true", help="also runs with include = false")
+    p.set_defaults(func=cmd_runs)
+    sub.add_parser("db-check", help="validate the database").set_defaults(func=cmd_db_check)
+    p = sub.add_parser("import-exclusions", help="legacy ExclusionList.txt -> study [exclude]")
+    p.add_argument("file")
+    p.add_argument("--study", default="PRL_AlNb")
+    p.set_defaults(func=cmd_import_exclusions)
     args = ap.parse_args(argv)
     try:
         return args.func(args)
-    except PathsNotConfigured as exc:
+    except (PathsNotConfigured, DatabaseError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 

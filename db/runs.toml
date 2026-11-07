@@ -1,0 +1,178 @@
+# ==========================================================================
+#  Runs. The KEY of a run is the name of its folder in EIA_DATA_ROOT
+#  (e.g. "20250623"); processed results use the same name.
+#
+#  include           false = known folder, not analysed (yet)
+#  target            species of the target (species.toml)
+#  label             short display label (figures, tables)
+#  laser             what is known of the laser conditions; approximate = true
+#                    marks order-of-magnitude values
+#  eia / fc / acquisition   names in instruments.toml
+#  mass_labels       'm' labels of the target in the legacy peak files
+#  spectra_species   species whose lines were picked in the SEM spectra (untitled28 mass list)
+#  fit_file_labels   <label> of the legacy CBS files CBS_fit_results_<label>_<El>.txt, tried in order
+#
+#  [legacy]  how the legacy results of this run were made, so they can be rebuilt exactly
+#    profile_peaks / profile_calibration / profile_cbs / profile_analysis
+#                    constants profile (constants.toml) used by untitled28 / untitled27 /
+#                    cbs_manual_fitter / plot scripts for this run
+#    cbs_components  legacy CBS number -> physical component
+#                    (fast, slow, ultra_fast, component_4); replaces the REMAP tables
+#                    of the plot scripts (values taken from plot_cbs_multipanel_v2 and
+#                    plot_collapse_v2, which agree)
+# ==========================================================================
+
+# ---------------------------------------------------------------- Al, 2025
+
+[runs."20250513"]
+include         = true
+target          = "Al"
+label           = "Al, 780 mJ"
+date            = 2025-05-13
+laser           = { energy_mJ = 780.0 }
+eia             = "EIA_2025"
+fc              = "FC_2025"
+acquisition     = "scope_2025"
+mass_labels     = [26]
+spectra_species = ["Nb", "Al", "H", "C", "O"]
+fit_file_labels = [27]
+[runs."20250513".legacy]
+profile_peaks       = "legacy_untitled28"
+profile_calibration = "legacy_proton"
+profile_cbs         = "legacy_proton"
+profile_analysis    = "legacy_amu_e1602"
+cbs_components      = { 1 = "slow", 2 = "fast", 3 = "ultra_fast", 4 = "component_4" }
+
+[runs."20250602"]
+include         = true
+target          = "Al"
+label           = "Al, 370 mJ"
+date            = 2025-06-02
+laser           = { energy_mJ = 370.0 }
+eia             = "EIA_2025"
+fc              = "FC_2025"
+acquisition     = "scope_2025"
+mass_labels     = [26]
+spectra_species = ["Nb", "Al", "H", "C", "O"]
+fit_file_labels = [27]
+[runs."20250602".legacy]
+profile_peaks       = "legacy_untitled28"
+profile_calibration = "legacy_proton"
+profile_cbs         = "legacy_proton"
+profile_analysis    = "legacy_amu_e1602"
+cbs_components      = { 1 = "slow", 2 = "fast", 3 = "ultra_fast", 4 = "component_4" }
+
+[runs."20250606"]
+include         = true
+target          = "Al"
+label           = "Al, 180 mJ"
+date            = 2025-06-06
+laser           = { energy_mJ = 180.0 }
+eia             = "EIA_2025"
+fc              = "FC_2025"
+acquisition     = "scope_2025"
+mass_labels     = [26]
+spectra_species = ["Nb", "Al", "H", "C", "O"]
+fit_file_labels = [27]
+[runs."20250606".legacy]
+profile_peaks       = "legacy_untitled28"
+profile_calibration = "legacy_proton"
+profile_cbs         = "legacy_proton"
+profile_analysis    = "legacy_amu_e1602"
+cbs_components      = { 1 = "fast", 2 = "slow", 3 = "ultra_fast", 4 = "component_4" }
+
+# ---------------------------------------------------------------- Nb, 2025
+
+[runs."20250611"]
+include         = true
+target          = "Nb"
+label           = "Nb, 780 mJ"
+date            = 2025-06-11
+laser           = { energy_mJ = 780.0 }
+eia             = "EIA_2025"
+fc              = "FC_2025"
+acquisition     = "scope_2025"
+mass_labels     = [92]
+spectra_species = ["Nb", "Al", "H", "C", "O"]
+fit_file_labels = [92]
+[runs."20250611".legacy]
+profile_peaks       = "legacy_untitled28"
+profile_calibration = "legacy_proton"
+profile_cbs         = "legacy_proton"
+profile_analysis    = "legacy_amu_e1602"
+cbs_components      = { 1 = "fast", 2 = "slow", 3 = "ultra_fast", 4 = "component_4" }
+
+[runs."20250623"]
+include         = true
+target          = "Nb"
+label           = "Nb, 370 mJ"
+date            = 2025-06-23
+laser           = { energy_mJ = 370.0 }
+eia             = "EIA_2025"
+fc              = "FC_2025"
+acquisition     = "scope_2025"
+mass_labels     = [92]
+spectra_species = ["Nb", "Al", "H", "C", "O"]
+fit_file_labels = [92]
+notes           = "legacy scripts label this folder 'Nb 780 results' in comments (N4): it is 370 mJ"
+[runs."20250623".legacy]
+profile_peaks       = "legacy_untitled28"
+profile_calibration = "legacy_proton"
+profile_cbs         = "legacy_proton"
+profile_analysis    = "legacy_amu_e1602"
+cbs_components      = { 1 = "slow", 2 = "fast", 3 = "ultra_fast", 4 = "component_4" }
+
+[runs."20250617"]
+include         = true
+target          = "Nb"
+label           = "Nb, 180 mJ"
+date            = 2025-06-17
+laser           = { energy_mJ = 180.0 }
+eia             = "EIA_2025"
+fc              = "FC_2025"
+acquisition     = "scope_2025"
+mass_labels     = [92]
+spectra_species = ["Nb", "Al", "H", "C", "O"]
+fit_file_labels = [92]
+notes           = "run table said June 16, folder is 20250617; no fast peak (left out of the collapse)"
+[runs."20250617".legacy]
+profile_peaks       = "legacy_untitled28"
+profile_calibration = "legacy_proton"
+profile_cbs         = "legacy_proton"
+profile_analysis    = "legacy_amu_e1602"
+cbs_components      = { 1 = "fast", 2 = "slow", 3 = "ultra_fast", 4 = "component_4" }
+
+# ---------------------------------------------------------------- Nb, 2026 (ps laser)
+
+[runs."2026_1103 Nb analysis"]
+include         = true
+target          = "Nb"
+label           = "Nb, 2026_1103 (ps)"
+date            = 2026-11-03
+laser           = { pulse = "ps", intensity_Wcm2 = 1e12, spot_um = 50.0, approximate = true }
+eia             = "EIA_2026_ps"
+fc              = "FC_2026_ps"
+acquisition     = "scope_2026_mdo"
+mass_labels     = [92, 93]
+spectra_species = ["Nb", "Al", "H", "C", "O"]
+fit_file_labels = [93, 92]
+notes           = "laser energy unknown; FC aperture unknown (0.50 cm assumed, see FC_2026_ps)"
+[runs."2026_1103 Nb analysis".legacy]
+profile_peaks       = "legacy_untitled28"
+profile_calibration = "legacy_amu_e1602"
+profile_cbs         = "legacy_amu_e1602"
+profile_analysis    = "legacy_amu_e1602"
+# numbering not checked yet in the legacy plot scripts (REMAP = None): to be verified in step 3
+cbs_components      = { 1 = "fast", 2 = "slow", 3 = "ultra_fast", 4 = "component_4" }
+
+# ---------------------------------------------------------------- known, not analysed
+
+[runs."20250506"]
+include = false
+label   = "20250506 (not analysed)"
+notes   = "ignored for now; no canonical legacy results (only 2_SEM/Output~), has 2_SEM/LowStateCharge; target not confirmed"
+
+[runs."20250508"]
+include = false
+label   = "20250508 (not analysed)"
+notes   = "ignored for now; has 4_MultiShotSameSpot and Full; target not confirmed"

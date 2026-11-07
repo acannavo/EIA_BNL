@@ -1,0 +1,36 @@
+# ==========================================================================
+#  Physical constants, by profile.
+#
+#  "corrected" is CODATA 2018 and is the default of the new software.
+#  The legacy profiles reproduce, bit for bit, the constants that each legacy
+#  script actually used, so that legacy results can be rebuilt exactly
+#  (plan: build on legacy -> compare -> fix). A run says which profile its
+#  legacy files were made with (runs.toml, [runs."<key>".legacy]).
+# ==========================================================================
+
+default_profile = "corrected"
+
+[profiles.corrected]
+description = "CODATA 2018 (scipy.constants)"
+amu_kg      = 1.66053906660e-27
+e_C         = 1.602176634e-19
+# species masses: species.toml (no override)
+
+[profiles.legacy_untitled28]
+description = "untitled28_EIA_Analysis_2 (peak picking): 'mp' = amu, CODATA-like e"
+amu_kg      = 1.66054e-27
+e_C         = 1.60217663e-19
+
+[profiles.legacy_proton]
+description = """cbs_manual_fitter_v12, plot_reconstructed_charge_states, untitled27 (e only):
+the PROTON mass was used as the mass unit (+0.73 %), Nb entered as 92.206 (typo), e = 1.602e-19 (issue I1)"""
+amu_kg      = 1.6726219e-27
+e_C         = 1.602e-19
+[profiles.legacy_proton.mass_amu_override]
+Nb = 92.206
+
+[profiles.legacy_amu_e1602]
+description = """plot_eia_powerLaw_test (already fixed for I1), plot_collapse_v2, and the PSexp_* scripts of
+the 2026_1103 run: amu = 1.66053907e-27, Nb = 92.906, but e = 1.602e-19"""
+amu_kg      = 1.66053907e-27
+e_C         = 1.602e-19
