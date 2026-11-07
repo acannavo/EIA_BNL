@@ -8,6 +8,9 @@ Command line entry point:  ``eiakit <command>``
     eiakit runs [--all]             runs of the database with their conditions
     eiakit db-check                 validate the database (exit code 1 on errors)
     eiakit files KEY [--list]       raw files a run's acquisition format picks up / skips
+    eiakit audit [KEY ...] [--study NAME]
+                                    audit of the legacy results (all included runs if no KEY);
+                                    reports in processed/<KEY>/00_legacy_import/
     eiakit import-exclusions FILE [--study NAME]
                                     legacy ExclusionList.txt -> the study's [exclude] table
 """
@@ -207,6 +210,31 @@ def cmd_files(args) -> int:
     return status
 
 
+def cmd_audit(args) -> int:
+    from .audit import audit_run, write_report
+    db = load_database()
+    paths = get_paths()
+    paths.ensure_output_dirs()
+    study = db.study(args.study) if args.study else None
+    keys = args.keys or [r.key for r in db.runs()]
+    print(f"{'run':<24}{'label':<22}{'errors':>7}{'warn':>6}{'info':>6}  report")
+    worst = 0
+    for key in keys:
+        run = db.run(key)
+        if not run.include:
+            print(f"{key:<24}(include = false, skipped)")
+            continue
+        rep = audit_run(db, run, paths.data, study)
+        out = write_report(rep, paths.processed / key / "00_legacy_import")
+        print(f"{key:<24}{run.label:<22}{rep.count('error'):>7}{rep.count('warn'):>6}"
+              f"{rep.count('info'):>6}  {out[0]}")
+        for f in rep.findings:
+            if f.level == "error":
+                print(f"{'':<24}  ERROR {f.code}: {f.title[:110]}")
+        worst = max(worst, 1 if rep.count("error") else 0)
+    return worst
+
+
 def cmd_import_exclusions(args) -> int:
     db = load_database()
     excl = import_exclusion_list(Path(args.file), db, args.study)
@@ -239,6 +267,10 @@ def main(argv=None) -> int:
     p.add_argument("key", help="run key (data folder name)")
     p.add_argument("--list", action="store_true", help="list every voltage and skipped file")
     p.set_defaults(func=cmd_files)
+    p = sub.add_parser("audit", help="audit of the legacy results of one or more runs")
+    p.add_argument("keys", nargs="*", help="run keys (default: every included run)")
+    p.add_argument("--study", default="PRL_AlNb", help="study whose exclusions are listed")
+    p.set_defaults(func=cmd_audit)
     p = sub.add_parser("import-exclusions", help="legacy ExclusionList.txt -> study [exclude]")
     p.add_argument("file")
     p.add_argument("--study", default="PRL_AlNb")
