@@ -21,12 +21,13 @@ from __future__ import annotations
 import datetime as dt
 import math
 import os
-import re
 import tomllib
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from .acquisition import Acquisition, deep_merge
 
 COMPONENTS = ("fast", "slow", "ultra_fast", "component_4")
 STAGES = ("peaks", "calibration", "cbs", "analysis")
@@ -98,54 +99,6 @@ class FCConfig(_Model):
         return math.pi * self.aperture_radius_cm ** 2
 
 
-Column = str | int
-
-
-class FileFormat(_Model):
-    header: str                       # "skiprows:<n>" | "detect:<WORD>"
-    time_column: Column
-    signal_column: Column
-
-    @field_validator("header")
-    @classmethod
-    def _header(cls, v):
-        if not re.fullmatch(r"skiprows:\d+|detect:\w+", v):
-            raise ValueError(f"header must be 'skiprows:<n>' or 'detect:<WORD>', got {v!r}")
-        return v
-
-
-class SEMFormat(FileFormat):
-    filename_regex: str
-
-    @field_validator("filename_regex")
-    @classmethod
-    def _regex(cls, v):
-        rx = re.compile(v)
-        missing = {"int", "rep"} - set(rx.groupindex)
-        if missing:
-            raise ValueError(f"filename_regex needs named groups {sorted(missing)}")
-        return v
-
-    def parse_name(self, filename: str) -> tuple[float, int] | None:
-        """(deflector voltage U [V], repeat number) from a SEM file name, or None."""
-        m = re.match(self.filename_regex, filename, flags=re.IGNORECASE)
-        if m is None:
-            return None
-        dec = m.groupdict().get("dec")
-        U = float(f"{int(m['int'])}.{dec}") if dec else float(int(m["int"]))
-        return U, int(m["rep"])
-
-
-class FCFormat(FileFormat):
-    glob: str
-
-
-class Acquisition(_Model):
-    description: str = ""
-    sem: SEMFormat
-    fc: FCFormat
-
-
 class Instruments(_Model):
     eia: dict[str, EIAConfig]
     fc: dict[str, FCConfig]
@@ -184,6 +137,7 @@ class RunRecord(_Model):
     eia: str | None = None
     fc: str | None = None
     acquisition: str | None = None
+    acquisition_overrides: dict = {}     # e.g. { sem = { signal_column = "CH2" } }
     mass_labels: list[int] = []
     spectra_species: list[str] = []
     fit_file_labels: list[int] = []
@@ -220,7 +174,11 @@ class Run:
 
     @property
     def acquisition(self) -> Acquisition:
-        return self._db.instruments.acquisition[self.rec.acquisition]
+        """The run's acquisition profile with its acquisition_overrides applied."""
+        base = self._db.instruments.acquisition[self.rec.acquisition]
+        if not self.rec.acquisition_overrides:
+            return base
+        return Acquisition(**deep_merge(base.model_dump(), self.rec.acquisition_overrides))
 
     @property
     def provisional(self) -> list[str]:
@@ -376,6 +334,11 @@ class Database:
                                  ("acquisition", ins.acquisition)):
                 if getattr(r, field) not in table:
                     err.append(f"{where}: unknown {field} {getattr(r, field)!r}")
+            if r.acquisition in ins.acquisition and r.acquisition_overrides:
+                try:
+                    _ = self.run(key).acquisition
+                except ValueError as exc:
+                    err.append(f"{where}: acquisition_overrides invalid: {exc}")
             for st in STAGES:
                 if r.legacy.profile(st) not in prof:
                     err.append(f"{where}: legacy profile_{st} {r.legacy.profile(st)!r} not defined")

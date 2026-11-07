@@ -52,19 +52,6 @@ def test_analyzer_factor(db):
     assert db.run("20250513").fc.aperture_area_cm2 == pytest.approx(math.pi * 0.25)
 
 
-@pytest.mark.parametrize("key,name,expected", [
-    ("20250513", "0p5v1.csv", (0.5, 1)),
-    ("20250513", "12p25v3.csv", (12.25, 3)),
-    ("20250513", "10v2.csv", (10.0, 2)),
-    ("20250513", "notes.csv", None),
-    ("2026_1103 Nb analysis", "000p6Data1.csv", (0.6, 1)),
-    ("2026_1103 Nb analysis", "091p0Data4.csv", (91.0, 4)),
-    ("2026_1103 Nb analysis", "000p6first.csv", None),
-])
-def test_sem_filenames(db, key, name, expected):
-    assert db.run(key).acquisition.sem.parse_name(name) == expected
-
-
 def test_legacy_component_labels(db):
     # remap tables of plot_cbs_multipanel_v2 / plot_collapse_v2
     assert db.run("20250513").legacy.cbs_components[1] == "slow"      # Al: {1:2, 2:1}

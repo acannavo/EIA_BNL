@@ -45,29 +45,58 @@ aperture_radius_cm = 0.50
 R_load_ohm         = 51.0     # confirmed same as 2025
 provisional        = ["aperture_radius_cm"]
 
-# ---- Acquisition / file formats --------------------------------------------
-#  sem.filename_regex  named groups: int, dec (optional), rep  ->  U = float("int.dec"), repeat = rep
-#  sem.header          "skiprows:<n>" (fixed header length)  or  "detect:TIME" (line starting with TIME)
-#  sem.time_column / sem.signal_column : column name, or 0-based index when the file has no usable header
+# ---- Acquisition / file formats -------------------------------------------
+#  How raw files are named and laid out. A run can override any field with
+#      [runs."<key>".acquisition_overrides]
+#      sem = { signal_column = "CH2", ignore = ["*bad*.csv"] }
+#
+#  patterns   file-name templates, first match wins (case-insensitive):
+#               {int}{dec}  U = float("int.dec")   e.g. 000p6 -> 0.6, 12p25 -> 12.25
+#               {U}         plain decimal number    e.g. 12.5
+#               {rep}       repeat / shot number    (missing -> 1)
+#               {*}         any text
+#             or "re:<regex>" with named groups U / int / dec / rep
+#  ignore     globs skipped before matching ("*first*.csv")
+#  header     "skiprows:<n>"  or  "detect:<WORD>" (first line whose first field is WORD)
+#  time_column / signal_column   column name, or 0-based index when there is no header line
+#  time_scale / signal_scale     factors applied after reading (time -> seconds; -1 flips polarity)
+#  u_scale    U [V] = value in the name x u_scale
+#  Check what a format picks up in a run folder with:  eiakit files <run key>
 
 [acquisition.scope_2025]
-description         = "2025 SEM exports <i>p<j>v<k>.csv, FC exports *.csv"
-sem.filename_regex  = '^(?P<int>\d+)(?:p(?P<dec>\d+))?v(?P<rep>\d+)\.csv$'
-sem.header          = "skiprows:22"
-sem.time_column     = 0
-sem.signal_column   = 1
-fc.glob             = "*.csv"
-fc.header           = "skiprows:20"
-fc.time_column      = "TIME"
-fc.signal_column    = "CH2"
+description = "2025 SEM exports <int>p<dec>v<rep>.csv (or <int>v<rep>.csv), FC exports *.csv"
+
+[acquisition.scope_2025.sem]
+folder        = "2_SEM"
+patterns      = ["{int}p{dec}v{rep}.csv", "{int}v{rep}.csv"]
+ignore        = []
+header        = "skiprows:22"
+time_column   = 0
+signal_column = 1
+
+[acquisition.scope_2025.fc]
+folder        = "1_FC_Start"
+folder_stop   = "3_FC_Stop"
+patterns      = ["{*}.csv"]
+header        = "skiprows:20"
+time_column   = "TIME"
+signal_column = "CH2"
 
 [acquisition.scope_2026_mdo]
-description         = "2026 Tektronix MDO exports <NNN>p<D>Data<k>.csv (only *Data*.csv), FC <name>Data<k>.csv"
-sem.filename_regex  = '^(?P<int>\d+)p(?P<dec>\d+)Data(?P<rep>\d+)\.csv$'
-sem.header          = "detect:TIME"
-sem.time_column     = "TIME"
-sem.signal_column   = "CH3"
-fc.glob             = "*Data*.csv"
-fc.header           = "skiprows:20"
-fc.time_column      = "TIME"
-fc.signal_column    = "CH2"
+description = "2026 Tektronix MDO exports <NNN>p<D>Data<k>.csv; the ...first / ...second files are not spectra"
+
+[acquisition.scope_2026_mdo.sem]
+folder        = "2_SEM"
+patterns      = ["{int}p{dec}Data{rep}.csv"]
+ignore        = ["*first*.csv", "*second*.csv"]
+header        = "detect:TIME"
+time_column   = "TIME"
+signal_column = "CH3"
+
+[acquisition.scope_2026_mdo.fc]
+folder        = "1_FC_Start"
+folder_stop   = "3_FC_Stop"
+patterns      = ["{*}Data{rep}.csv"]
+header        = "skiprows:20"
+time_column   = "TIME"
+signal_column = "CH2"

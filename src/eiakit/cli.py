@@ -7,6 +7,7 @@ Command line entry point:  ``eiakit <command>``
     eiakit checksum-compare A B     compare two manifests (exit code 1 if they differ)
     eiakit runs [--all]             runs of the database with their conditions
     eiakit db-check                 validate the database (exit code 1 on errors)
+    eiakit files KEY [--list]       raw files a run's acquisition format picks up / skips
     eiakit import-exclusions FILE [--study NAME]
                                     legacy ExclusionList.txt -> the study's [exclude] table
 """
@@ -21,6 +22,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import __version__
+from .acquisition import scan_folder
 from .checksum import build_manifest, compare_manifests, read_manifest, write_manifest
 from .db import DatabaseError, format_exclude_toml, import_exclusion_list, load_database
 from .layout import discover_runs
@@ -147,6 +149,58 @@ def cmd_db_check(_args) -> int:
     return 0 if not errors else 1
 
 
+def cmd_files(args) -> int:
+    db = load_database()
+    run = db.run(args.key)
+    if not run.include:
+        print(f"{run.key}: include = false in runs.toml (no acquisition format)")
+        return 1
+    folder = run.folder(get_paths().data)
+    acq = run.acquisition
+    print(f"{run.key} ({run.label})   acquisition: {run.rec.acquisition}"
+          + ("  + overrides" if run.rec.acquisition_overrides else ""))
+    status = 0
+    blocks = [("SEM", acq.sem, acq.sem.folder), ("FC start", acq.fc, acq.fc.folder)]
+    if acq.fc.folder_stop:
+        blocks.append(("FC stop", acq.fc, acq.fc.folder_stop))
+    for title, fmt, sub in blocks:
+        sc = scan_folder(folder / sub, fmt)
+        print(f"\n[{title}]  {folder / sub}")
+        print(f"  patterns {fmt.patterns}   ignore {fmt.ignore}")
+        if sc.missing_folder:
+            print("  FOLDER MISSING")
+            status = 1
+            continue
+        print(f"  matched {len(sc.matched)}   ignored {len(sc.ignored)}   "
+              f"unmatched {len(sc.unmatched)}")
+        if title == "SEM":
+            byU = sc.by_voltage()
+            reps = sorted({len(r) for r in byU.values()})
+            if byU:
+                Us = list(byU)
+                print(f"  {len(byU)} deflector voltages U = {Us[0]:g} ... {Us[-1]:g} V,"
+                      f" repeats per U: {reps}")
+            odd = {U: r for U, r in byU.items() if len(r) != max(reps, default=0)}
+            if odd:
+                print(f"  U with fewer repeats: {odd}")
+            if args.list:
+                for U, r in byU.items():
+                    print(f"    U = {U:<8g} repeats {r}")
+        dup = sc.duplicates()
+        if dup:
+            print(f"  DUPLICATE (U, repeat): {dup}")
+            status = 1
+        for label, files in (("unmatched", sc.unmatched), ("ignored", sc.ignored)):
+            shown = files if args.list else files[:10]
+            for f in shown:
+                print(f"    {label}: {f.name}")
+            if len(files) > len(shown):
+                print(f"    ... {len(files) - len(shown)} more {label} (use --list)")
+        if not sc.matched:
+            status = 1
+    return status
+
+
 def cmd_import_exclusions(args) -> int:
     db = load_database()
     excl = import_exclusion_list(Path(args.file), db, args.study)
@@ -175,6 +229,10 @@ def main(argv=None) -> int:
     p.add_argument("--all", action="store_true", help="also runs with include = false")
     p.set_defaults(func=cmd_runs)
     sub.add_parser("db-check", help="validate the database").set_defaults(func=cmd_db_check)
+    p = sub.add_parser("files", help="raw files picked up by a run's acquisition format")
+    p.add_argument("key", help="run key (data folder name)")
+    p.add_argument("--list", action="store_true", help="list every voltage and skipped file")
+    p.set_defaults(func=cmd_files)
     p = sub.add_parser("import-exclusions", help="legacy ExclusionList.txt -> study [exclude]")
     p.add_argument("file")
     p.add_argument("--study", default="PRL_AlNb")

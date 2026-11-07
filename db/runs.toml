@@ -8,6 +8,9 @@
 #  laser             what is known of the laser conditions; approximate = true
 #                    marks order-of-magnitude values
 #  eia / fc / acquisition   names in instruments.toml
+#  acquisition_overrides     optional, changes single fields of the acquisition profile
+#                    for this run only, e.g.
+#                    acquisition_overrides = { sem = { signal_column = "CH2" } }
 #  mass_labels       'm' labels of the target in the legacy peak files
 #  spectra_species   species whose lines were picked in the SEM spectra (untitled28 mass list)
 #  fit_file_labels   <label> of the legacy CBS files CBS_fit_results_<label>_<El>.txt, tried in order

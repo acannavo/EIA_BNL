@@ -13,7 +13,6 @@ min_points        = 4         # fewer points in the window -> no fit (PSexp vers
 [calibration]                 # untitled27_REFACTORED_4
 n_interp          = 100000    # common TOF grid of the EIA spectra
 fc_grid_points    = 1000      # common grid of the FC traces (N7: coarse)
-fc_folder         = "1_FC_Start"
 method            = "peak"    # "peak" (legacy, CFY = max FC / max sum EIA) | "area" (I2)
 interp_fill       = "zero"    # "zero" (legacy) | "nan" (I4: mask outside the measured range)
 
