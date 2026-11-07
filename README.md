@@ -79,7 +79,7 @@ git clone https://github.com/acannavo/EIA_BNL.git C:\Users\acannavo\code\EIA_BNL
 cd C:\Users\acannavo\code\EIA_BNL
 . .\env.ps1 -Install      # first time: creates .venv and installs eiakit + dev tools
 eiakit info               # versions, paths, run folders found
-pytest                    # tests
+pytest                    # tests (set $env:EIA_SLOW=1 to include the slow real-data replays)
 ```
 
 Every new terminal: `. .\env.ps1` (the leading dot matters). In VS Code the default
@@ -106,9 +106,10 @@ eiakit db-check                      validate the database
 eiakit files KEY [--list]            raw files picked up / skipped by the run's file format
 eiakit audit [KEY ...] [--study NAME]
                                      audit of the legacy results -> processed\KEY\00_legacy_import
-eiakit peaks KEY [--U V ...] [--max-clicks N]
+eiakit peaks KEY [--U V ...] [--max-clicks N] [--deep] [-v]
                                      peak stage (untitled28): refits each voltage from the raw
-                                     SEM files, recovers the U arrow clicks used in the GUI and
+                                     SEM files, recovers the GUI state that was not saved (U
+                                     arrow clicks, averaging grid; --deep: LOF clicks, Corr) and
                                      compares with Output_detail -> processed\KEY\10_peaks
 eiakit calibrate KEY [--fc start|stop|both] [--baseline auto|pretrigger|V] [--legacy-cfy]
                                      calibration stage (untitled27), compared with the legacy

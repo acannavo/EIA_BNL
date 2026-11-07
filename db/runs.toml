@@ -41,6 +41,8 @@ spectra_species = ["Nb", "Al", "H", "C", "O"]
 fit_file_labels = [27]
 [runs."20250513".legacy]
 profile_peaks       = "legacy_untitled28"
+peaks_lof_m         = 3.8499999999999996   # LOF = 3.86 - 0.01 in untitled28 (2025)
+peaks_grid          = "previous"           # N9 grid length rule of the 2025 script
 profile_calibration = "legacy_proton"
 profile_cbs         = "legacy_proton"
 profile_analysis    = "legacy_amu_e1602"
@@ -60,6 +62,8 @@ spectra_species = ["Nb", "Al", "H", "C", "O"]
 fit_file_labels = [27]
 [runs."20250602".legacy]
 profile_peaks       = "legacy_untitled28"
+peaks_lof_m         = 3.8499999999999996   # LOF = 3.86 - 0.01 in untitled28 (2025)
+peaks_grid          = "previous"           # N9 grid length rule of the 2025 script
 profile_calibration = "legacy_proton"
 profile_cbs         = "legacy_proton"
 profile_analysis    = "legacy_amu_e1602"
@@ -79,6 +83,8 @@ spectra_species = ["Nb", "Al", "H", "C", "O"]
 fit_file_labels = [27]
 [runs."20250606".legacy]
 profile_peaks       = "legacy_untitled28"
+peaks_lof_m         = 3.8499999999999996   # LOF = 3.86 - 0.01 in untitled28 (2025)
+peaks_grid          = "previous"           # N9 grid length rule of the 2025 script
 profile_calibration = "legacy_proton"
 profile_cbs         = "legacy_proton"
 profile_analysis    = "legacy_amu_e1602"
@@ -100,6 +106,8 @@ spectra_species = ["Nb", "Al", "H", "C", "O"]
 fit_file_labels = [92]
 [runs."20250611".legacy]
 profile_peaks       = "legacy_untitled28"
+peaks_lof_m         = 3.8499999999999996   # LOF = 3.86 - 0.01 in untitled28 (2025)
+peaks_grid          = "previous"           # N9 grid length rule of the 2025 script
 profile_calibration = "legacy_proton"
 profile_cbs         = "legacy_proton"
 profile_analysis    = "legacy_amu_e1602"
@@ -120,6 +128,8 @@ fit_file_labels = [92]
 notes           = "legacy scripts label this folder 'Nb 780 results' in comments (N4): it is 370 mJ"
 [runs."20250623".legacy]
 profile_peaks       = "legacy_untitled28"
+peaks_lof_m         = 3.8499999999999996   # LOF = 3.86 - 0.01 in untitled28 (2025)
+peaks_grid          = "previous"           # N9 grid length rule of the 2025 script
 profile_calibration = "legacy_proton"
 profile_cbs         = "legacy_proton"
 profile_analysis    = "legacy_amu_e1602"
@@ -140,6 +150,8 @@ fit_file_labels = [92]
 notes           = "run table said June 16, folder is 20250617; no fast peak (left out of the collapse)"
 [runs."20250617".legacy]
 profile_peaks       = "legacy_untitled28"
+peaks_lof_m         = 3.8499999999999996   # LOF = 3.86 - 0.01 in untitled28 (2025)
+peaks_grid          = "previous"           # N9 grid length rule of the 2025 script
 profile_calibration = "legacy_proton"
 profile_cbs         = "legacy_proton"
 profile_analysis    = "legacy_amu_e1602"

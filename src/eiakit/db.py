@@ -121,6 +121,11 @@ class LegacyInfo(_Model):
     profile_cbs: str
     profile_analysis: str
     cbs_components: dict[int, Literal["fast", "slow", "ultra_fast", "component_4"]]
+    # untitled28 state that is not in the eia record: the LOF pre-filled in the GUI
+    # (2025 script: 3.86 - 0.01 = 3.8499999999999996) and the averaging-grid rule
+    # ("previous": length of the last shot of the previous voltage, N9; "max": PSexp)
+    peaks_lof_m: float | None = None
+    peaks_grid: Literal["max", "previous"] = "max"
 
     def profile(self, stage: str) -> str:
         if stage not in STAGES:

@@ -9,7 +9,9 @@ from eiakit.peaks import (
     fit_peak,
     fit_voltage,
     gaussian,
+    gui_lof,
     gui_voltage,
+    legacy_grid_lengths,
     predicted_tof,
     replay_voltage,
 )
@@ -95,3 +97,30 @@ def test_average_repeats_on_a_common_grid_is_the_plain_mean():
     t = np.linspace(0, 1, 11)
     g, y = average_repeats([(t, t * 0 + 1), (t, t * 0 + 3)])
     assert np.allclose(g, t) and np.allclose(y, 2)
+
+
+def test_gui_lof_round_trip():
+    entry, step = str(3.8499999999999996), str(3.8499999999999996 / 100)
+    for _ in range(2):
+        entry = str(round(float(entry) + float(step), 6))
+    assert gui_lof(3.8499999999999996, 2) == float(entry) == 3.927
+
+
+def test_legacy_grid_lengths_previous_voltage_rule(tmp_path):
+    from pathlib import Path
+    names = {"10v1.csv": 100, "10v2.csv": 110, "5p5v1.csv": 200, "5p5v2.csv": 210,
+             "20v1.csv": 300}
+    files = [(Path(n), float(n.split("v")[0].replace("p", ".")), int(n[-5])) for n in names]
+    lens = legacy_grid_lengths(files, lambda p: names[p.name])
+    # glob order 10v1, 10v2, 20v1, 5p5v1, 5p5v2: first U takes the last file read (5p5v2),
+    # the next ones the last shot of the previous U
+    assert lens == {10.0: 210, 20.0: 110, 5.5: 300}
+
+
+def test_match_levels():
+    from eiakit.peaks import match_rows
+    old = pd.DataFrame({"m": [92, 92, 92], "z": [1, 2, 3], "TOF": [1e-5, 2e-5, 3e-5],
+                        "YieldAveFit": [-0.1, -0.2, -0.3]})
+    new = pd.DataFrame({"m": [92, 92, 92], "z": [1, 2, 3], "TOF": [1e-5, 2e-5, 3.03e-5],
+                        "YieldAveFit": [-0.1, -0.2 * (1 + 3e-7), -0.3], "success": True})
+    assert list(match_rows(new, old).level) == ["exact", "equivalent", "different"]

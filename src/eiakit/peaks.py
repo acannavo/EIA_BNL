@@ -40,8 +40,8 @@ def gaussian(x, A, mu, sigma, B):
 def average_repeats(traces, n_points: int | None = None):
     """
     Repeats of one U interpolated on a common grid (min..max of all their times) and
-    averaged. n_points defaults to the longest trace (untitled28 PSexp; the 2025 version
-    used the length of the last file read, identical when all records have 10000 points).
+    averaged. n_points defaults to the longest trace (untitled28 PSexp); the 2025 version
+    used another length, see legacy_grid_lengths (N9).
     """
     t_all = np.concatenate([t for t, _ in traces])
     n = n_points or max(len(t) for t, _ in traces)
@@ -158,51 +158,220 @@ def _click_order(max_clicks: int):
         yield n
 
 
-def match_rows(new: pd.DataFrame, old: pd.DataFrame, rtol: float = 1e-9) -> pd.DataFrame:
-    """Row-by-row comparison with an Output_detail table (same (m, z) order or lookup)."""
+def legacy_grid_lengths(files: list[tuple], length_of) -> dict[float, int]:
+    """
+    Grid length of each voltage in the 2025 untitled28 (N9). The script reads the files
+    in glob order, then averages with  np.linspace(min, max, len(data))  where `data` is
+    the last DataFrame bound: for the first voltage the last file read, for the others
+    the last shot of the previous voltage (the averaging loop rebinds `data`).
+    files: (path, U, rep) of the SEM folder; length_of(path) -> number of points (only
+    called for the files that set a grid).
+    The glob order on Windows (NTFS) is the case-insensitive name order.
+    """
+    order = sorted(files, key=lambda f: f[0].name.upper())
+    groups: dict[float, list] = {}
+    for f in order:
+        groups.setdefault(f[1], []).append(f[0])
+    out, prev = {}, (order[-1][0] if order else None)
+    for U, paths in groups.items():
+        out[U] = length_of(prev)
+        prev = paths[-1]
+    return out
+
+
+def gui_lof(lof0: float, clicks: int, step_frac: float = 0.01) -> float:
+    """LOF box after `clicks` arrow clicks: step = float(str(LOF/100)), str(round(lof, 6))."""
+    text = str(lof0)
+    step = float(str(lof0 / round(1 / step_frac)))
+    for _ in range(abs(int(clicks))):
+        text = str(round(float(text) + (step if clicks > 0 else -step), 6))
+    return float(text)
+
+
+def _click_order(max_clicks: int):
+    yield 0
+    for n in range(1, max_clicks + 1):
+        yield -n
+        yield n
+
+
+# match levels: 'exact' = same numbers up to rounding of the last digits; 'equivalent' =
+# the same fit within the convergence noise of curve_fit (1e-9 .. 1e-6 seen between
+# machines / scipy versions); anything else is a different fit.
+EXACT_RTOL = 1e-9
+EQUIV_TOF_RTOL = 1e-8
+EQUIV_A_RTOL = 1e-6
+
+
+def match_rows(new: pd.DataFrame, old: pd.DataFrame) -> pd.DataFrame:
+    """Row-by-row comparison with the Output_detail rows of one voltage."""
     rows = []
     for r in old.itertuples():
         cand = new[(new.m == r.m) & (new.z == r.z)]
+        base = {"m": r.m, "z": r.z, "TOF_old": r.TOF, "A_old": r.YieldAveFit}
         if cand.empty or not bool(cand.iloc[0].success):
-            rows.append({"m": r.m, "z": r.z, "TOF_old": r.TOF, "TOF_new": np.nan,
-                         "A_old": r.YieldAveFit, "A_new": np.nan, "dTOF_rel": np.nan,
-                         "dA_rel": np.nan, "match": False})
+            rows.append({**base, "TOF_new": np.nan, "A_new": np.nan, "dTOF_rel": np.nan,
+                         "dA_rel": np.nan, "level": "different", "match": False})
             continue
         c = cand.iloc[0]
         dt = abs(c.TOF / r.TOF - 1)
         da = abs(c.YieldAveFit - r.YieldAveFit) / max(abs(r.YieldAveFit), 1e-300)
-        rows.append({"m": r.m, "z": r.z, "TOF_old": r.TOF, "TOF_new": c.TOF,
-                     "A_old": r.YieldAveFit, "A_new": c.YieldAveFit, "dTOF_rel": dt,
-                     "dA_rel": da, "match": bool(dt < rtol and da < rtol)})
+        if dt < EXACT_RTOL and da < EXACT_RTOL:
+            level = "exact"
+        elif dt < EQUIV_TOF_RTOL and da < EQUIV_A_RTOL:
+            level = "equivalent"
+        else:
+            level = "different"
+        rows.append({**base, "TOF_new": c.TOF, "A_new": c.YieldAveFit, "dTOF_rel": dt,
+                     "dA_rel": da, "level": level, "match": level != "different"})
     return pd.DataFrame(rows)
 
 
 def replay_voltage(traces_by_rep: dict[int, tuple], U_file: float, detail: pd.DataFrame,
                    gui_masses: dict[int, float], L_m: float, eia, profile, settings: dict,
-                   corr: float = 0.0, rtol: float = 1e-9) -> dict:
+                   grids: tuple = (None,), lof_clicks: tuple = (0,),
+                   corrs: tuple = (0.0,)) -> dict:
     """
-    Reproduce the legacy fits of one voltage, searching the number of U arrow clicks.
-    detail: the Output_detail rows of this voltage (columns m, z, TOF, YieldAveFit, ...).
-    Returns {clicks, U_used, n_rows, n_match, status, fits, comparison}; status is
-    'exact' (all rows), 'partial' (best click count, some rows differ) or 'no-mass'.
+    Reproduce the legacy fits of one voltage by searching the GUI state that was not
+    saved: U arrow clicks (always), averaging-grid length (`grids`, None = longest
+    trace), LOF arrow clicks and Corr (deep search). L_m is the LOF pre-filled in the GUI.
+    Returns {clicks, U_used, grid_n, lof_clicks, LOF_used, corr, n_rows, n_match,
+    n_exact, status, fits, comparison}; status 'exact' | 'equivalent' | 'partial' |
+    'no-mass'. The search stops at the first state that reproduces every row.
     """
     keys = detail[["m", "z"]].drop_duplicates()
     missing = sorted({int(m) for m in keys.m if int(m) not in gui_masses})
     if missing:
         return {"clicks": None, "U_used": None, "n_rows": len(detail), "n_match": 0,
-                "status": "no-mass", "missing_masses": missing}
+                "n_exact": 0, "status": "no-mass", "missing_masses": missing}
     lines = [(gui_masses[int(m)], int(m), int(z)) for m, z in keys.itertuples(index=False)]
     step = settings.get("u_step_frac", 0.002)
-    best = None
-    for n in _click_order(int(settings.get("max_u_clicks", 15))):
-        U = gui_voltage(U_file, n, step)
-        fits = fit_voltage(traces_by_rep, U, lines, L_m, eia, profile, settings, corr)
-        cmp = match_rows(fits, detail, rtol)
-        k = int(cmp.match.sum())
-        if best is None or k > best["n_match"]:
-            best = {"clicks": n, "U_used": U, "n_rows": len(detail), "n_match": k,
-                    "fits": fits, "comparison": cmp}
-        if k == len(detail):
-            break
-    best["status"] = "exact" if best["n_match"] == best["n_rows"] else "partial"
+    lstep = settings.get("lof_step_frac", 0.01)
+    reps = sorted(traces_by_rep)
+    best, score_best = None, (-1, -1)
+    for grid_n in dict.fromkeys(grids):
+        avg = average_repeats([traces_by_rep[r] for r in reps], grid_n)
+        for corr in corrs:
+            for nl in lof_clicks:
+                lof = gui_lof(L_m, nl, lstep)
+                for n in _click_order(int(settings.get("max_u_clicks", 15))):
+                    U = gui_voltage(U_file, n, step)
+                    fits = _fit_lines(avg, traces_by_rep, reps, U, lines, lof, eia, profile,
+                                      settings, corr)
+                    cmp = match_rows(fits, detail)
+                    score = (int(cmp.match.sum()), int((cmp.level == "exact").sum()))
+                    if score > score_best:
+                        score_best = score
+                        best = {"clicks": n, "U_used": U, "grid_n": len(avg[0]),
+                                "lof_clicks": nl, "LOF_used": lof, "corr": corr,
+                                "n_rows": len(detail), "n_match": score[0],
+                                "n_exact": score[1], "fits": fits, "comparison": cmp}
+                    if score[1] == len(detail):
+                        best["status"] = "exact"
+                        return best
+    if best["n_match"] == best["n_rows"]:
+        best["status"] = "equivalent"
+    else:
+        best["status"] = "partial"
     return best
+
+
+def _fit_lines(avg, traces_by_rep, reps, U, lines, L_m, eia, profile, settings, corr):
+    tof, y = avg
+    out = []
+    for m_amu, label, z in lines:
+        t0 = predicted_tof(m_amu, z, U, L_m, eia, profile)
+        f = fit_peak(tof, y, t0, corr, settings.get("window_frac", 0.02),
+                     settings.get("mu_bound_s", 150e-9), settings.get("min_points", 1))
+        row = {"m": label, "z": z, "TOF": f["mu"], "Yield": f["A"], "success": f["success"]}
+        if f["success"]:
+            row["YieldAveFit"] = f["A"]
+        out.append(row)
+    return pd.DataFrame(out)
+
+
+def replay_run(db, run, data_root, voltages=None, max_clicks=None, deep=False, deep_lof=3,
+               log=None, verbose=False) -> dict:
+    """
+    Replay every voltage of a run that has raw SEM files and an Output_detail file.
+    Grid candidates: the run's legacy rule first, then the other one. With deep=True
+    also LOF clicks within +/- deep_lof and Corr in {0, 0.005, 0.01, 0.02, 0.03, 0.05}.
+    Returns {summary: [dict per voltage], rows: [comparison DataFrames], counts}.
+    """
+    from functools import cache
+
+    from .acquisition import read_trace, scan_folder
+    from .legacy import read_output_detail_folder
+
+    log = log or (lambda *_: None)
+    fmt = run.acquisition.sem
+    sem = run.folder(data_root) / fmt.folder
+    detail = read_output_detail_folder(sem / "Output_detail")
+    scan = scan_folder(sem, fmt)
+    settings = dict(db.pipeline["peaks"])
+    if max_clicks is not None:
+        settings["max_u_clicks"] = max_clicks
+    gui_masses = {int(k): float(v) for k, v in settings.pop("gui_masses", {}).items()}
+    leg = run.legacy
+    rule = leg.peaks_grid if leg else "max"
+    profile_name = leg.profile_peaks if leg else "legacy_untitled28"
+    profile = db.profile(profile_name)
+    lof0 = leg.peaks_lof_m if leg and leg.peaks_lof_m is not None else run.eia.L_m
+
+    @cache
+    def length_of(path):
+        return len(read_trace(path, fmt)[0])
+
+    prev_len = legacy_grid_lengths(scan.matched, length_of)
+    lof_clicks = tuple(sorted(range(-deep_lof, deep_lof + 1), key=abs)) if deep else (0,)
+    corrs = (0.0, 0.005, 0.01, 0.02, 0.03, 0.05) if deep else (0.0,)
+    log(f"{run.key}: LOF in GUI = {lof0!r} m, profile {profile_name}, grid rule {rule},"
+        f" U step = U/{round(1 / settings['u_step_frac'])}"
+        + (f", deep search (LOF +/-{deep_lof} clicks, Corr {corrs})" if deep else ""))
+    Us = sorted(set(detail.U)) if not voltages else sorted(voltages)
+    summary, rows = [], []
+    for U in Us:
+        files = {rep: p for p, u, rep in scan.matched if u == U}
+        d = detail[detail.U == U] if not detail.empty else detail
+        rec = {"U_file": U, "n_files": len(files), "n_rows": len(d)}
+        if not files or d.empty:
+            rec["status"] = "no raw files" if not files else "no Output_detail"
+            summary.append(rec)
+            continue
+        traces = {rep: read_trace(p, fmt) for rep, p in sorted(files.items())}
+        n_max = max(len(t[0]) for t in traces.values())
+        g_prev = prev_len.get(U)
+        grids = (g_prev, None) if rule == "previous" else (None, g_prev)
+        r = replay_voltage(traces, U, d, gui_masses, lof0, run.eia, profile, settings,
+                           grids=grids, lof_clicks=lof_clicks, corrs=corrs)
+        keys = ("clicks", "U_used", "grid_n", "lof_clicks", "LOF_used", "corr",
+                "n_match", "n_exact", "status")
+        rec.update({k: r.get(k) for k in keys}, n_max=n_max, grid_previous=g_prev)
+        if r["status"] == "no-mass":
+            rec["status"] = f"no GUI mass for labels {r['missing_masses']}"
+        else:
+            rows.append(r["comparison"].assign(U_file=U, clicks=r["clicks"],
+                                               U_used=r["U_used"], grid_n=r["grid_n"]))
+        summary.append(rec)
+        if rec["status"] == "exact" and not verbose:
+            continue
+        extra = ""
+        if r.get("grid_n") is not None and r["grid_n"] != n_max:
+            extra += f"  grid {r['grid_n']} (longest shot {n_max})"
+        if r.get("lof_clicks"):
+            extra += f"  LOF {r['LOF_used']!r} ({r['lof_clicks']:+d})"
+        if r.get("corr"):
+            extra += f"  Corr {r['corr']}"
+        log(f"  U = {U:>8g}: {len(files)} files, {rec['n_rows']:>3} rows -> "
+            f"{rec['status']:<10} clicks {rec.get('clicks')!s:>4}  U_used {rec.get('U_used')!r}"
+            f"  ({rec.get('n_match', 0)}/{rec['n_rows']}){extra}")
+        if rec["status"] == "partial":
+            c = r["comparison"]
+            for x in c[~c.match].itertuples():
+                log(f"        m={x.m} z={x.z}: TOF {x.TOF_old:.6e} -> {x.TOF_new:.6e} "
+                    f"(rel {x.dTOF_rel:.1e}), A {x.A_old:.4e} -> {x.A_new:.4e} "
+                    f"(rel {x.dA_rel:.1e})")
+    st = [s_.get("status") for s_ in summary]
+    counts = {k: st.count(k) for k in ("exact", "equivalent", "partial")}
+    counts["skipped"] = len(st) - sum(counts.values())
+    return {"summary": summary, "rows": rows, "counts": counts}

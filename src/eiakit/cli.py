@@ -14,7 +14,7 @@ Command line entry point:  ``eiakit <command>``
     eiakit calibrate KEY [--fc start|stop|both] [--baseline auto|pretrigger|<V>] [--legacy-cfy]
                                     calibration stage (untitled27); compares with the legacy
                                     checkpoint; outputs in processed/<KEY>/20_calibration/
-    eiakit peaks KEY [--U V ...] [--max-clicks N]
+    eiakit peaks KEY [--U V ...] [--max-clicks N] [--deep] [-v]
                                     peak stage (untitled28): refits every voltage with raw SEM
                                     files and an Output_detail file, recovers the U arrow
                                     clicks; outputs in processed/<KEY>/10_peaks/
@@ -329,60 +329,22 @@ def cmd_calibrate(args) -> int:
 def cmd_peaks(args) -> int:
     import pandas as pd
 
-    from .acquisition import read_trace, scan_folder
-    from .legacy import read_output_detail_folder
-    from .peaks import replay_voltage
+    from .peaks import replay_run
 
     db = load_database()
     paths = get_paths()
     run = db.run(args.key)
-    folder = run.folder(paths.data)
-    fmt = run.acquisition.sem
-    sem = folder / fmt.folder
-    detail = read_output_detail_folder(sem / "Output_detail")
-    if detail.empty:
-        print(f"ERROR: no Output_detail in {sem}")
-        return 2
-    scan = scan_folder(sem, fmt)
-    settings = dict(db.pipeline["peaks"])
-    if args.max_clicks is not None:
-        settings["max_u_clicks"] = args.max_clicks
-    gui_masses = {int(k): float(v) for k, v in settings.pop("gui_masses", {}).items()}
-    profile = db.profile(run.legacy.profile_peaks)
-    voltages = sorted(set(detail.U)) if not args.U else sorted(args.U)
     out = paths.processed / run.key / "10_peaks"
     out.mkdir(parents=True, exist_ok=True)
-    summary, rows = [], []
-    print(f"{run.key}: L_EIA = {run.eia.L_m} m, profile {run.legacy.profile_peaks}, "
-          f"U step = U/{round(1 / settings['u_step_frac'])}")
-    for U in voltages:
-        files = {rep: p for p, u, rep in scan.matched if u == U}
-        d = detail[detail.U == U]
-        rec = {"U_file": U, "n_files": len(files), "n_rows": len(d)}
-        if not files or d.empty:
-            rec["status"] = "no raw files" if not files else "no Output_detail"
-            summary.append(rec)
-            continue
-        traces = {rep: read_trace(p, fmt) for rep, p in sorted(files.items())}
-        r = replay_voltage(traces, U, d, gui_masses, run.eia.L_m, run.eia, profile, settings)
-        rec.update({k: r.get(k) for k in ("clicks", "U_used", "n_match", "status")})
-        if r["status"] == "no-mass":
-            rec["status"] = f"no GUI mass for labels {r['missing_masses']}"
-        else:
-            c = r["comparison"].assign(U_file=U, clicks=r["clicks"], U_used=r["U_used"])
-            rows.append(c)
-        summary.append(rec)
-        print(f"  U = {U:>8g}: {len(files)} files, {rec['n_rows']:>3} rows -> "
-              f"{rec['status']:<8} clicks {rec.get('clicks')!s:>4}  U_used {rec.get('U_used')!r}"
-              f"  ({rec.get('n_match', 0)}/{rec['n_rows']})")
-    pd.DataFrame(summary).to_csv(out / "replay_summary.csv", index=False)
-    if rows:
-        pd.concat(rows).to_csv(out / "replay_rows.csv", index=False)
-    n_exact = sum(s.get("status") == "exact" for s in summary)
-    n_fit = sum("clicks" in s and s.get("clicks") is not None for s in summary)
-    print(f"{n_exact}/{n_fit} refitted voltages reproduced exactly; "
-          f"{len(summary) - n_fit} skipped. -> {out}")
-    return 0 if n_exact == n_fit else 1
+    res = replay_run(db, run, paths.data, voltages=args.U, max_clicks=args.max_clicks,
+                     deep=args.deep, deep_lof=args.deep_lof, log=print, verbose=args.verbose)
+    pd.DataFrame(res["summary"]).to_csv(out / "replay_summary.csv", index=False)
+    if res["rows"]:
+        pd.concat(res["rows"]).to_csv(out / "replay_rows.csv", index=False)
+    c = res["counts"]
+    print(f"{run.key}: {c['exact']} exact, {c['equivalent']} equivalent, {c['partial']} partial, "
+          f"{c['skipped']} skipped -> {out}")
+    return 0 if c["partial"] == 0 else 1
 
 
 def cmd_import_exclusions(args) -> int:
@@ -435,6 +397,10 @@ def main(argv=None) -> int:
     p.add_argument("--U", type=float, nargs="+", help="only these file voltages")
     p.add_argument("--max-clicks", type=int, default=None,
                    help="search the U arrow clicks within +/- N (default from pipeline.toml)")
+    p.add_argument("--deep", action="store_true",
+                   help="also search LOF arrow clicks and Corr (slow; for 'partial' voltages)")
+    p.add_argument("--deep-lof", type=int, default=3, help="LOF clicks searched with --deep")
+    p.add_argument("-v", "--verbose", action="store_true", help="also list exact voltages")
     p.set_defaults(func=cmd_peaks)
     p = sub.add_parser("import-exclusions", help="legacy ExclusionList.txt -> study [exclude]")
     p.add_argument("file")
