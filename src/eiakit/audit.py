@@ -69,11 +69,16 @@ def _find_cbs_file(results_dir: Path, prefix: str, labels: list[int], target: st
     return None
 
 
-def _match_profile(db, species: str, M_header: float | None):
-    """Name of the constants profile whose ion mass matches the file header (6 digits)."""
+def _match_profile(db, species: str, M_header: float | None, prefer: str | None = None):
+    """Name of the constants profile whose ion mass matches the file header (6 digits);
+    `prefer` (the run's own legacy profile) is tried first."""
     if M_header is None:
         return None
-    for name in db.constants.profiles:
+    names = list(db.constants.profiles)
+    if prefer in names:
+        names.remove(prefer)
+        names.insert(0, prefer)
+    for name in names:
         if abs(db.mass_kg(species, name) / M_header - 1) < 2e-6:
             return name
     return None
@@ -234,7 +239,7 @@ def _audit_checkpoint(rep: Report, ck: dict, out: pd.DataFrame, run, db):
 
 def _audit_cbs(rep: Report, fit, areas, ck, run, db):
     h = fit.header
-    prof = _match_profile(db, run.target, h.M_ION_kg)
+    prof = _match_profile(db, run.target, h.M_ION_kg, run.legacy.profile_cbs)
     rep.facts["cbs"] = {"generated": h.generated, "L_EIA": h.L_EIA_m, "M_ION": h.M_ION_kg,
                         "signal": h.signal, "mass_profile": prof,
                         "components": len(fit.components),

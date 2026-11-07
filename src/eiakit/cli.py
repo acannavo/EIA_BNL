@@ -11,6 +11,9 @@ Command line entry point:  ``eiakit <command>``
     eiakit audit [KEY ...] [--study NAME]
                                     audit of the legacy results (all included runs if no KEY);
                                     reports in processed/<KEY>/00_legacy_import/
+    eiakit calibrate KEY [--fc start|stop|both] [--baseline auto|pretrigger|<V>] [--legacy-cfy]
+                                    calibration stage (untitled27); compares with the legacy
+                                    checkpoint; outputs in processed/<KEY>/20_calibration/
     eiakit import-exclusions FILE [--study NAME]
                                     legacy ExclusionList.txt -> the study's [exclude] table
 """
@@ -235,6 +238,90 @@ def cmd_audit(args) -> int:
     return worst
 
 
+def cmd_calibrate(args) -> int:
+    import json
+
+    import numpy as np
+
+    from .acquisition import read_trace, scan_folder
+    from .calibration import calibrate, compare_checkpoints, recover_fc_baseline
+    from .legacy import load_checkpoint, read_output_folder
+    from .store import save_calibration_h5
+
+    db = load_database()
+    paths = get_paths()
+    run = db.run(args.key)
+    folder = run.folder(paths.data)
+    pipe = db.pipeline["calibration"]
+    rows = read_output_folder(folder / "2_SEM" / "Output")
+    if rows.empty:
+        print(f"ERROR: no peak table in {folder / '2_SEM' / 'Output'}")
+        return 2
+    fmt = run.acquisition.fc
+    dirs = {"start": [fmt.folder], "stop": [fmt.folder_stop],
+            "both": [fmt.folder, fmt.folder_stop]}[args.fc]
+    traces, used = [], []
+    for d in dirs:
+        if d is None:
+            continue
+        for p, _, _ in scan_folder(folder / d, fmt).matched:
+            traces.append(read_trace(p, fmt))
+            used.append(f"{d}/{p.name}")
+    ck_path = folder / "EIA-Results" / "pipeline_checkpoint.npy"
+    old = load_checkpoint(ck_path) if ck_path.is_file() else None
+
+    cfy = None
+    if args.legacy_cfy:
+        if old is None:
+            print("ERROR: --legacy-cfy needs the legacy checkpoint")
+            return 2
+        cfy, B, how = old["CFY_1m"], 0.0, "CFY_1m taken from the legacy checkpoint"
+    elif args.baseline == "auto":
+        if old is None or not traces:
+            print("ERROR: --baseline auto needs the legacy checkpoint and FC traces")
+            return 2
+        B = recover_fc_baseline(old, traces, int(pipe["fc_grid_points"]), run.eia, run.fc)
+        how = "recovered from the legacy checkpoint (N7)"
+    elif args.baseline == "pretrigger":
+        pre = np.concatenate([v[t < 0] for t, v in traces])
+        B, how = float(np.mean(pre)), f"mean of the FC signal before t = 0 ({pre.size} samples)"
+    else:
+        B, how = float(args.baseline), "given on the command line"
+    if not traces and cfy is None:
+        print(f"ERROR: no FC traces found in {dirs}")
+        return 2
+
+    res = calibrate(rows, traces, B, run.eia, run.fc, pipe, cfy_1m_override=cfy)
+    out_dir = paths.processed / run.key / "20_calibration"
+    info = {"run": run.key, "fc_files": used, "fc_baseline_V": B, "baseline_method": how,
+            "fc_peak_V": res["fc_peak_V"], "CFY_1m": res["CFY_1m"], "CFY_EIA": res["CFY_EIA"],
+            "n_output_rows": len(rows), "pairs": len(res["corrected_spectra"]),
+            "settings": {k: pipe[k] for k in ("n_interp", "fc_grid_points", "method",
+                                              "interp_fill")}}
+    if old is not None:
+        diff = compare_checkpoints(res, old)
+        num = [v for v in diff.values() if isinstance(v, float)]
+        info["legacy_comparison"] = {"max_rel_diff": max(num), "per_key": diff,
+                                     "identical_1e-9": all(isinstance(v, float) and v < 1e-9
+                                                           for v in diff.values())}
+    save_calibration_h5(out_dir / "spectra.h5", res, {"run": run.key, "baseline_method": how})
+    (out_dir / "calibration.json").write_text(json.dumps(info, indent=2, default=str),
+                                              encoding="utf-8")
+    print(f"{run.key} ({run.label}): {len(rows)} peak rows, {len(res['corrected_spectra'])} "
+          f"(m, z) spectra, {len(traces)} FC traces")
+    print(f"  FC baseline {B * 1e3:.4f} mV ({how}); FC peak {res['fc_peak_V'] * 1e3:.4f} mV; "
+          f"CFY_1m = {res['CFY_1m']:.6e}")
+    if old is not None:
+        lc = info["legacy_comparison"]
+        print(f"  legacy checkpoint: max relative difference {lc['max_rel_diff']:.1e} -> "
+              f"{'IDENTICAL (< 1e-9)' if lc['identical_1e-9'] else 'DIFFERENT'}")
+        for k, v in lc["per_key"].items():
+            if not isinstance(v, float) or v >= 1e-9:
+                print(f"    {k}: {v}")
+    print(f"  written: {out_dir / 'spectra.h5'}, calibration.json")
+    return 0 if old is None or info["legacy_comparison"]["identical_1e-9"] else 1
+
+
 def cmd_import_exclusions(args) -> int:
     db = load_database()
     excl = import_exclusion_list(Path(args.file), db, args.study)
@@ -271,6 +358,15 @@ def main(argv=None) -> int:
     p.add_argument("keys", nargs="*", help="run keys (default: every included run)")
     p.add_argument("--study", default="PRL_AlNb", help="study whose exclusions are listed")
     p.set_defaults(func=cmd_audit)
+    p = sub.add_parser("calibrate", help="calibration stage (untitled27)")
+    p.add_argument("key")
+    p.add_argument("--fc", choices=["start", "stop", "both"], default="start",
+                   help="FC traces to average (default: 1_FC_Start, as untitled27)")
+    p.add_argument("--baseline", default="auto",
+                   help="FC pedestal: auto (from the legacy checkpoint), pretrigger, or volts")
+    p.add_argument("--legacy-cfy", action="store_true",
+                   help="use CFY_1m of the legacy checkpoint instead of the FC")
+    p.set_defaults(func=cmd_calibrate)
     p = sub.add_parser("import-exclusions", help="legacy ExclusionList.txt -> study [exclude]")
     p.add_argument("file")
     p.add_argument("--study", default="PRL_AlNb")

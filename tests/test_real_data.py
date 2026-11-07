@@ -25,3 +25,18 @@ def test_legacy_fits_reproduce_and_labels_are_consistent(key):
     assert "N3" not in errors, "fast/slow labels of runs.toml contradict the arrival times"
     assert "CK-GEOM" not in errors and "CK-CHAIN" not in errors
     assert "I1" not in errors
+
+
+@pytest.mark.parametrize("key", [k for k in RUNS if (ROOT / k / "2_SEM" / "Output").is_dir()])
+def test_checkpoint_rebuilt_from_output(key):
+    """untitled27 port: the legacy checkpoint is rebuilt from 2_SEM/Output (CFY taken from it)."""
+    from eiakit.calibration import calibrate, compare_checkpoints
+    from eiakit.legacy import load_checkpoint, read_output_folder
+    run = db.run(key)
+    old = load_checkpoint(ROOT / key / "EIA-Results" / "pipeline_checkpoint.npy")
+    rows = read_output_folder(ROOT / key / "2_SEM" / "Output")
+    new = calibrate(rows, None, 0.0, run.eia, run.fc, db.pipeline["calibration"],
+                    cfy_1m_override=old["CFY_1m"])
+    d = compare_checkpoints(new, old)
+    bad = {k: v for k, v in d.items() if not isinstance(v, float) or v > 1e-9}
+    assert not bad, bad
