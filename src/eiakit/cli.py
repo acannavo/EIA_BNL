@@ -175,21 +175,27 @@ def cmd_files(args) -> int:
               f"unmatched {len(sc.unmatched)}")
         if title == "SEM":
             byU = sc.by_voltage()
-            reps = sorted({len(r) for r in byU.values()})
             if byU:
+                from collections import Counter
+                counts = Counter(len(r) for r in byU.values())
+                usual = counts.most_common(1)[0][0]
                 Us = list(byU)
-                print(f"  {len(byU)} deflector voltages U = {Us[0]:g} ... {Us[-1]:g} V,"
-                      f" repeats per U: {reps}")
-            odd = {U: r for U, r in byU.items() if len(r) != max(reps, default=0)}
-            if odd:
-                print(f"  U with fewer repeats: {odd}")
+                print(f"  {len(byU)} deflector voltages U = {Us[0]:g} ... {Us[-1]:g} V; "
+                      f"usual repeats per U: {usual} ({counts[usual]} voltages)")
+                other = {U: len(r) for U, r in byU.items() if len(r) != usual}
+                if other:
+                    print("  other repeat counts: "
+                          + ", ".join(f"{U:g} V: {n}" for U, n in other.items()))
+                gaps = {U: r for U, r in byU.items() if r != list(range(1, len(r) + 1))}
+                if gaps:
+                    print(f"  repeat numbers not 1..n: {gaps}")
             if args.list:
                 for U, r in byU.items():
                     print(f"    U = {U:<8g} repeats {r}")
-        dup = sc.duplicates()
-        if dup:
-            print(f"  DUPLICATE (U, repeat): {dup}")
-            status = 1
+            dup = sc.duplicates()
+            if dup:
+                print(f"  DUPLICATE (U, repeat): {dup}")
+                status = 1
         for label, files in (("unmatched", sc.unmatched), ("ignored", sc.ignored)):
             shown = files if args.list else files[:10]
             for f in shown:

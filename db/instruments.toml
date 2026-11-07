@@ -83,12 +83,12 @@ time_column   = "TIME"
 signal_column = "CH2"
 
 [acquisition.scope_2026_mdo]
-description = "2026 Tektronix MDO exports <NNN>p<D>Data<k>.csv; the ...first / ...second files are not spectra"
+description = "2026 Tektronix MDO exports <NNN>p<D>Data<k>.csv; the ...first / ...second (shot) files are not used"
 
 [acquisition.scope_2026_mdo.sem]
 folder        = "2_SEM"
 patterns      = ["{int}p{dec}Data{rep}.csv"]
-ignore        = ["*first*.csv", "*second*.csv"]
+ignore        = ["*first*.csv", "*second*.csv", "*.py"]
 header        = "detect:TIME"
 time_column   = "TIME"
 signal_column = "CH3"
@@ -97,6 +97,7 @@ signal_column = "CH3"
 folder        = "1_FC_Start"
 folder_stop   = "3_FC_Stop"
 patterns      = ["{*}Data{rep}.csv"]
+ignore        = ["*firstshot*.csv", "*secondshot*.csv"]     # single shots, not averaged by untitled27
 header        = "skiprows:20"
 time_column   = "TIME"
 signal_column = "CH2"
