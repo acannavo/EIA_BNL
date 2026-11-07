@@ -103,6 +103,16 @@ eiakit checksum [--root DIR] [--out FILE] [--skip-variants]
 eiakit checksum-compare A.csv B.csv  compare two manifests
 eiakit runs [--all]                  runs and their conditions (--all: also runs not analysed)
 eiakit db-check                      validate the database
+eiakit files KEY [--list]            raw files picked up / skipped by the run's file format
+eiakit audit [KEY ...] [--study NAME]
+                                     audit of the legacy results -> processed\KEY\00_legacy_import
+eiakit peaks KEY [--U V ...] [--max-clicks N]
+                                     peak stage (untitled28): refits each voltage from the raw
+                                     SEM files, recovers the U arrow clicks used in the GUI and
+                                     compares with Output_detail -> processed\KEY\10_peaks
+eiakit calibrate KEY [--fc start|stop|both] [--baseline auto|pretrigger|V] [--legacy-cfy]
+                                     calibration stage (untitled27), compared with the legacy
+                                     checkpoint -> processed\KEY\20_calibration
 eiakit import-exclusions FILE [--study PRL_AlNb]
                                      convert a legacy ExclusionList.txt to the study's [exclude] table
 ```

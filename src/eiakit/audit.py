@@ -99,11 +99,23 @@ def _audit_output(rep: Report, out: pd.DataFrame, detail: pd.DataFrame | None, r
     # N1: the same (m, z) written more than once in one file (append on every save)
     dup = out[out.duplicated(["file", "m", "z"], keep=False)]
     if len(dup):
-        det = [f"{f}: (m, z) = {sorted(set(zip(g.m, g.z, strict=True)))}"
-               for f, g in dup.groupby("file")]
+        det = []
+        for f, g in dup.groupby("file"):
+            line = f"{f}: (m, z) = {sorted(set(zip(g.m, g.z, strict=True)))}"
+            whole = out[out.file == f]
+            dd = detail[detail.file == f] if detail is not None and not detail.empty else None
+            if dd is not None and len(dd) and len(whole) > len(dd):
+                tail = whole.tail(len(dd))
+                last = (np.allclose(tail.TOF.values, dd.TOF.values, rtol=1e-12)
+                        and np.allclose(tail.Yield.values, dd.YieldAveFit.values, rtol=1e-12))
+                line += (f"; last {len(dd)} rows = Output_detail (last save), "
+                         f"{len(whole) - len(dd)} rows of older saves above"
+                         if last else "; last rows differ from Output_detail")
+            det.append(line)
         rep.add("error", "N1", f"{dup.groupby('file').ngroups} Output file(s) contain the same "
-                f"(m, z) more than once ({len(dup)} rows); all copies enter the interpolation",
-                det)
+                f"(m, z) more than once ({len(dup)} rows): 'Save Fitted Points' appends to "
+                f"Output but overwrites Output_detail, so every earlier save stays in Output "
+                f"and all copies enter the interpolation", det)
     # N14: identical rows in two different files (fit of one U saved under another U)
     key = ["m", "z", "TOF", "Yield"]
     cp = out[out.duplicated(key, keep=False)]

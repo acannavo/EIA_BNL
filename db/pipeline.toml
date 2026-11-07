@@ -9,6 +9,20 @@ corr_default      = 0.0
 mu_bound_s        = 150e-9    # mu constrained to t0 +/- this
 sigma_max_frac    = 0.1667    # sigma <= window width / 6
 min_points        = 4         # fewer points in the window -> no fit (PSexp version; 2025 used 1)
+u_step_frac       = 0.002     # GUI arrow step of U = p_value / 500 (untitled28 default)
+lof_step_frac     = 0.01      # GUI arrow step of LOF = LOF / 100
+max_u_clicks      = 15        # replay: search the U actually used within +/- this many clicks
+
+# Masses typed in the untitled28 GUI (amu), keyed by the mass label written in Output
+# (= int(typed mass)). Needed only to replay the legacy fits. 92 / 1 / 12 / 15 verified
+# bit-exact on 20250611 and 2026_1103; 26 (Al) not yet verified (no Al raw SEM tested).
+[peaks.gui_masses]
+92 = 92.906
+26 = 26.98
+1  = 1.008
+12 = 12.01
+15 = 15.99
+16 = 15.99
 
 [calibration]                 # untitled27_REFACTORED_4
 n_interp          = 100000    # common TOF grid of the EIA spectra
