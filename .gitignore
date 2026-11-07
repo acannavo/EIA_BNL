@@ -1,0 +1,43 @@
+# ── Data and results: never in the repository ─────────────────
+data/
+processed/
+studies/
+legacy/
+*.npy
+*.npz
+*.h5
+*.hdf5
+ExclusionList.txt
+
+# ── Documentation: only README.md is versioned ────────────────
+# (development plans and notes are working files kept outside git)
+*.md
+!README.md
+
+# ── Local environment ─────────────────────────────────────────
+.venv/
+.env
+env.local.ps1
+
+# ── Python ────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# ── Editors / OS ──────────────────────────────────────────────
+.vscode/*
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store
+~$*
