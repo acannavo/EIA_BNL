@@ -26,6 +26,8 @@ still computed from the file voltage, so the clicks shift only the fit windows (
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pandas as pd
 from scipy.optimize import curve_fit
@@ -76,7 +78,9 @@ def fit_peak(tof, y, t0: float, corr: float = 0.0, window_frac: float = 0.02,
     lower = [A_guess, t0 - mu_bound_s, 0, -np.inf]
     upper = [0, t0 + mu_bound_s, sigma_guess, B_guess]
     try:
-        popt, _ = curve_fit(gaussian, x, yy, p0=p0, bounds=(lower, upper))
+        with warnings.catch_warnings(), np.errstate(all="ignore"):
+            warnings.simplefilter("ignore", RuntimeWarning)
+            popt, _ = curve_fit(gaussian, x, yy, p0=p0, bounds=(lower, upper))
     except (RuntimeError, ValueError, TypeError) as exc:
         res["reason"] = f"fit failed: {exc}"
         return res
@@ -290,6 +294,29 @@ def _fit_lines(avg, traces_by_rep, reps, U, lines, L_m, eia, profile, settings, 
     return pd.DataFrame(out)
 
 
+def shot_check(traces_by_rep: dict[int, tuple], detail: pd.DataFrame) -> dict:
+    """
+    Are the raw shots the ones that were fitted? Compares the stored per-shot values
+    Yield1..n (np.interp of each shot at the fitted TOF) with the raw files.
+    Returns {n_stored, n_files, max_rel (same order), max_rel_any_order}.
+    """
+    cols = sorted((c for c in detail.columns if c.startswith("Yield") and c[5:].isdigit()),
+                  key=lambda c: int(c[5:]))
+    stored = detail[cols].to_numpy(float)
+    n_stored = int(np.isfinite(stored).all(axis=0).sum()) if len(stored) else 0
+    reps = sorted(traces_by_rep)
+    raw = np.array([[np.interp(t, *traces_by_rep[r]) for r in reps] for t in detail.TOF])
+    scale = np.nanmax(np.abs(stored[:, :n_stored])) if n_stored else 1.0
+    out = {"n_stored": n_stored, "n_files": len(reps), "max_rel": np.nan,
+           "max_rel_any_order": np.nan}
+    if n_stored == len(reps) and len(stored):
+        st = stored[:, :n_stored]
+        out["max_rel"] = float(np.nanmax(np.abs(st - raw)) / scale)
+        out["max_rel_any_order"] = float(np.nanmax(np.abs(np.sort(st, 1) - np.sort(raw, 1)))
+                                         / scale)
+    return out
+
+
 def replay_run(db, run, data_root, voltages=None, max_clicks=None, deep=False, deep_lof=3,
                log=None, verbose=False) -> dict:
     """
@@ -323,6 +350,10 @@ def replay_run(db, run, data_root, voltages=None, max_clicks=None, deep=False, d
         return len(read_trace(path, fmt)[0])
 
     prev_len = legacy_grid_lengths(scan.matched, length_of)
+
+    @cache
+    def all_lengths():
+        return tuple(sorted({length_of(p) for p, _, _ in scan.matched}))
     lof_clicks = tuple(sorted(range(-deep_lof, deep_lof + 1), key=abs)) if deep else (0,)
     corrs = (0.0, 0.005, 0.01, 0.02, 0.03, 0.05) if deep else (0.0,)
     log(f"{run.key}: LOF in GUI = {lof0!r} m, profile {profile_name}, grid rule {rule},"
@@ -344,6 +375,16 @@ def replay_run(db, run, data_root, voltages=None, max_clicks=None, deep=False, d
         grids = (g_prev, None) if rule == "previous" else (None, g_prev)
         r = replay_voltage(traces, U, d, gui_masses, lof0, run.eia, profile, settings,
                            grids=grids, lof_clicks=lof_clicks, corrs=corrs)
+        if r.get("status") == "partial":
+            others = tuple(n for n in all_lengths() if n not in (g_prev, n_max))
+            if others:
+                r2 = replay_voltage(traces, U, d, gui_masses, lof0, run.eia, profile,
+                                    settings, grids=others, lof_clicks=lof_clicks, corrs=corrs)
+                if (r2["n_match"], r2["n_exact"]) > (r["n_match"], r["n_exact"]):
+                    r = r2
+        sc = shot_check(traces, d)
+        rec.update(shots_stored=sc["n_stored"], shots_max_rel=sc["max_rel"],
+                   shots_max_rel_any_order=sc["max_rel_any_order"])
         keys = ("clicks", "U_used", "grid_n", "lof_clicks", "LOF_used", "corr",
                 "n_match", "n_exact", "status")
         rec.update({k: r.get(k) for k in keys}, n_max=n_max, grid_previous=g_prev)
@@ -366,6 +407,14 @@ def replay_run(db, run, data_root, voltages=None, max_clicks=None, deep=False, d
             f"{rec['status']:<10} clicks {rec.get('clicks')!s:>4}  U_used {rec.get('U_used')!r}"
             f"  ({rec.get('n_match', 0)}/{rec['n_rows']}){extra}")
         if rec["status"] == "partial":
+            if sc["n_stored"] != sc["n_files"]:
+                log(f"        shots: {sc['n_stored']} stored in Output_detail, "
+                    f"{sc['n_files']} raw files")
+            else:
+                same = "yes" if sc["max_rel"] < 1e-9 else (
+                    "yes, other order" if sc["max_rel_any_order"] < 1e-9 else "NO")
+                log(f"        raw shots = fitted shots: {same} "
+                    f"(max rel {sc['max_rel']:.1e})")
             c = r["comparison"]
             for x in c[~c.match].itertuples():
                 log(f"        m={x.m} z={x.z}: TOF {x.TOF_old:.6e} -> {x.TOF_new:.6e} "
