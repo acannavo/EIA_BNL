@@ -1,8 +1,8 @@
 # ── Data and results: never in the repository ─────────────────
-data/
-processed/
-studies/
-legacy/
+/data/
+/processed/
+/studies/
+/legacy/
 *.npy
 *.npz
 *.h5

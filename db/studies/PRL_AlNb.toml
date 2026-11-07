@@ -1,0 +1,48 @@
+# ==========================================================================
+#  Study PRL_AlNb: the comparison figures of the Al / Nb paper draft.
+#  Replaces the configuration blocks of plot_cbs_multipanel_v2,
+#  plot_eia_powerLaw_test, plot_collapse_v2 and plot_reconstructed_charge_states_v2.
+#  Runs are referred to by their key (= data folder name).
+# ==========================================================================
+
+name        = "PRL_AlNb"
+description = "Al and Nb, ns laser 180 / 370 / 780 mJ (2025), optional ps Nb run (2026_1103)"
+
+runs        = ["20250513", "20250602", "20250606", "20250611", "20250623", "20250617"]
+extra_runs  = ["2026_1103 Nb analysis"]   # shown in an extra column when include_extra = true
+include_extra = false                     # false = the original 2 x 3 figures
+
+# grid layout: rows = target element, columns = laser energy
+rows           = ["Al", "Nb"]
+column_energy_mJ = [180.0, 370.0, 780.0]
+
+# components with a horizontal mean +/- std line (velocity figures)
+avg_components = { Al = ["fast", "ultra_fast"], Nb = ["fast"] }
+
+[zbar]
+# power-law fit window of zbar(E) [eV]; missing bound = open
+e_max_eV       = { Al = 1.0e4, Nb = 3.1e4 }
+lower_from_z   = 2              # lower edge raised to where this z starts
+reference      = "sheil_2024_sn"
+
+[collapse]
+runs              = ["20250513", "20250602", "20250606", "20250611", "20250623"]   # 20250617: no fast peak
+literature        = ["poirier_2023_sn", "kondrashev_2006_nb"]
+min_fast_points   = 2
+peak_min_prom_frac = 0.05
+peak_err_mode     = "hwhm"      # "hwhm" | "triplet"
+cbs_t_source      = "exp"       # "exp" (raw PEAK sample) | "fit" (Picks t_peak)
+
+[reconstruction]                # plot_reconstructed_charge_states_v2: run -> charge states shown
+panels = [
+    { run = "20250513", z = [5, 6] },
+    { run = "20250611", z = [6, 7] },
+]
+
+# --------------------------------------------------------------------------
+#  Exclusions: (run, physical component or "all") -> charge states removed from
+#  every figure. To be filled from ExclusionList.txt with
+#      eiakit import-exclusions <path>\ExclusionList.txt
+#  which prints the [exclude] table to paste here.
+# --------------------------------------------------------------------------
+[exclude]
