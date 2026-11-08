@@ -1,0 +1,700 @@
+# GUI state of untitled28 recovered by `eiakit peaks 20250513 --write-state`.
+# clicks: U arrow clicks (U/500 each); lof_clicks: LOF arrow clicks (LOF/100);
+# corr: Corr box; grid_n: points of the averaging grid. Generated - edit only
+# the 'note' entries.
+
+[voltages."0.5"]
+status = "exact"
+clicks = 0
+U_used = 0.5
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 7
+n_match = 7
+n_exact = 7
+
+[voltages."1.0"]
+status = "exact"
+clicks = 12
+U_used = 1.024
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 7
+n_match = 7
+n_exact = 7
+
+[voltages."3.5"]
+status = "exact"
+clicks = -6
+U_used = 3.4579999999999993
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 7
+n_match = 7
+n_exact = 7
+
+[voltages."5.0"]
+status = "exact"
+clicks = -7
+U_used = 4.9300000000000015
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 8
+n_match = 8
+n_exact = 8
+
+[voltages."7.5"]
+status = "exact"
+clicks = -6
+U_used = 7.410000000000002
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 10
+n_match = 10
+n_exact = 10
+
+[voltages."10.0"]
+status = "exact"
+clicks = -2
+U_used = 9.96
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 10
+n_match = 10
+n_exact = 10
+
+[voltages."12.5"]
+status = "exact"
+clicks = -8
+U_used = 12.299999999999997
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 12
+n_match = 12
+n_exact = 12
+
+[voltages."15.0"]
+status = "exact"
+clicks = -4
+U_used = 14.880000000000003
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 12
+n_match = 12
+n_exact = 12
+
+[voltages."17.0"]
+status = "exact"
+clicks = -5
+U_used = 16.830000000000005
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 14
+n_match = 14
+n_exact = 14
+
+[voltages."18.5"]
+status = "exact"
+clicks = -2
+U_used = 18.426000000000002
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 17
+n_match = 17
+n_exact = 17
+
+[voltages."20.0"]
+status = "equivalent"
+clicks = -8
+U_used = 19.680000000000007
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 19
+n_match = 19
+n_exact = 18
+
+[voltages."22.5"]
+status = "equivalent"
+clicks = -9
+U_used = 22.094999999999985
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 19
+n_match = 19
+n_exact = 18
+
+[voltages."25.0"]
+status = "exact"
+clicks = -7
+U_used = 24.649999999999995
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 17
+n_match = 17
+n_exact = 17
+
+[voltages."27.5"]
+status = "exact"
+clicks = -5
+U_used = 27.225
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 17
+n_match = 17
+n_exact = 17
+
+[voltages."30.0"]
+status = "exact"
+clicks = -6
+U_used = 29.640000000000008
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 17
+n_match = 17
+n_exact = 17
+
+[voltages."35.0"]
+status = "exact"
+clicks = -6
+U_used = 34.58
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 17
+n_match = 17
+n_exact = 17
+
+[voltages."40.0"]
+status = "exact"
+clicks = -6
+U_used = 39.52000000000001
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 18
+n_match = 18
+n_exact = 18
+
+[voltages."45.0"]
+status = "equivalent"
+clicks = -5
+U_used = 44.54999999999998
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 18
+n_match = 18
+n_exact = 17
+
+[voltages."50.0"]
+status = "exact"
+clicks = -6
+U_used = 49.39999999999999
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 18
+n_match = 18
+n_exact = 18
+
+[voltages."55.0"]
+status = "exact"
+clicks = -4
+U_used = 54.56
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 18
+n_match = 18
+n_exact = 18
+
+[voltages."60.0"]
+status = "equivalent"
+clicks = -4
+U_used = 59.52000000000001
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 18
+n_match = 18
+n_exact = 16
+
+[voltages."65.0"]
+status = "exact"
+clicks = -5
+U_used = 64.35000000000002
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 18
+n_match = 18
+n_exact = 18
+
+[voltages."70.0"]
+status = "equivalent"
+clicks = -6
+U_used = 69.16
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 18
+n_match = 18
+n_exact = 17
+
+[voltages."75.0"]
+status = "exact"
+clicks = -4
+U_used = 74.39999999999998
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 18
+n_match = 18
+n_exact = 18
+
+[voltages."80.0"]
+status = "exact"
+clicks = -7
+U_used = 78.88000000000002
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 18
+n_match = 18
+n_exact = 18
+
+[voltages."85.0"]
+status = "exact"
+clicks = -4
+U_used = 84.32
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 18
+n_match = 18
+n_exact = 18
+
+[voltages."90.0"]
+status = "equivalent"
+clicks = -2
+U_used = 89.63999999999999
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 18
+n_match = 18
+n_exact = 17
+
+[voltages."100.0"]
+status = "exact"
+clicks = -3
+U_used = 99.39999999999999
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 18
+n_match = 18
+n_exact = 18
+
+[voltages."120.0"]
+status = "exact"
+clicks = -6
+U_used = 118.56000000000003
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 18
+n_match = 18
+n_exact = 18
+
+[voltages."140.0"]
+status = "equivalent"
+clicks = -6
+U_used = 138.32
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 18
+n_match = 18
+n_exact = 17
+
+[voltages."160.0"]
+status = "exact"
+clicks = -7
+U_used = 157.76000000000005
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 17
+n_match = 17
+n_exact = 17
+
+[voltages."180.0"]
+status = "exact"
+clicks = -7
+U_used = 177.4799999999999
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 17
+n_match = 17
+n_exact = 17
+
+[voltages."200.0"]
+status = "exact"
+clicks = -8
+U_used = 196.79999999999995
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 17
+n_match = 17
+n_exact = 17
+
+[voltages."225.0"]
+status = "exact"
+clicks = -7
+U_used = 221.85000000000008
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 17
+n_match = 17
+n_exact = 17
+
+[voltages."225.1"]
+status = "exact"
+clicks = -9
+U_used = 221.04820000000004
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 19
+n_match = 19
+n_exact = 19
+
+[voltages."250.0"]
+status = "equivalent"
+clicks = -8
+U_used = 246.0
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 19
+n_match = 19
+n_exact = 18
+
+[voltages."250.1"]
+status = "exact"
+clicks = -9
+U_used = 245.59819999999993
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 19
+n_match = 19
+n_exact = 19
+
+[voltages."300.0"]
+status = "exact"
+clicks = -5
+U_used = 296.9999999999999
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 19
+n_match = 19
+n_exact = 19
+
+[voltages."350.0"]
+status = "exact"
+clicks = -6
+U_used = 345.80000000000007
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 19
+n_match = 19
+n_exact = 19
+
+[voltages."400.0"]
+status = "exact"
+clicks = -7
+U_used = 394.3999999999999
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 19
+n_match = 19
+n_exact = 19
+
+[voltages."450.0"]
+status = "exact"
+clicks = -7
+U_used = 443.70000000000016
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 19
+n_match = 19
+n_exact = 19
+
+[voltages."500.0"]
+status = "equivalent"
+clicks = -4
+U_used = 496.0
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 19
+n_match = 19
+n_exact = 18
+
+[voltages."550.0"]
+status = "exact"
+clicks = -5
+U_used = 544.4999999999999
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 19
+n_match = 19
+n_exact = 19
+
+[voltages."600.0"]
+status = "exact"
+clicks = -4
+U_used = 595.1999999999998
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 17
+n_match = 17
+n_exact = 17
+
+[voltages."650.0"]
+status = "exact"
+clicks = -3
+U_used = 646.1000000000001
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 17
+n_match = 17
+n_exact = 17
+
+[voltages."700.0"]
+status = "equivalent"
+clicks = -4
+U_used = 694.4000000000001
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 17
+n_match = 17
+n_exact = 16
+
+[voltages."750.0"]
+status = "exact"
+clicks = -4
+U_used = 744.0
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 17
+n_match = 17
+n_exact = 17
+
+[voltages."800.0"]
+status = "equivalent"
+clicks = -7
+U_used = 788.7999999999998
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 17
+n_match = 17
+n_exact = 16
+
+[voltages."800.1"]
+status = "exact"
+clicks = 0
+U_used = 800.1
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 17
+n_match = 17
+n_exact = 17
+
+[voltages."840.0"]
+status = "exact"
+clicks = -4
+U_used = 833.2800000000002
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 17
+n_match = 17
+n_exact = 17
+
+[voltages."840.1"]
+status = "exact"
+clicks = -3
+U_used = 835.0594
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 17
+n_match = 17
+n_exact = 17
+
+[voltages."900.0"]
+status = "exact"
+clicks = -3
+U_used = 894.6000000000001
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 17
+n_match = 17
+n_exact = 17
+
+[voltages."1000.0"]
+status = "exact"
+clicks = -5
+U_used = 990.0
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 17
+n_match = 17
+n_exact = 17
+
+[voltages."1100.0"]
+status = "equivalent"
+clicks = -6
+U_used = 1086.7999999999997
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 17
+n_match = 17
+n_exact = 16
+
+[voltages."1250.0"]
+status = "equivalent"
+clicks = -1
+U_used = 1247.5
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 16
+n_match = 16
+n_exact = 15
+
+[voltages."1500.0"]
+status = "exact"
+clicks = 0
+U_used = 1500.0
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 9
+n_match = 9
+n_exact = 9
+
+[voltages."1750.0"]
+status = "exact"
+clicks = 0
+U_used = 1750.0
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 7
+n_match = 7
+n_exact = 7
+
+[voltages."2000.0"]
+status = "exact"
+clicks = 0
+U_used = 2000.0
+grid_n = 9999
+lof_clicks = 0
+LOF_used = 3.8499999999999996
+corr = 0.0
+n_rows = 3
+n_match = 3
+n_exact = 3
