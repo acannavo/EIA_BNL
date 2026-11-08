@@ -14,7 +14,7 @@ Command line entry point:  ``eiakit <command>``
     eiakit calibrate KEY [--fc start|stop|both] [--baseline auto|pretrigger|<V>] [--legacy-cfy]
                                     calibration stage (untitled27); compares with the legacy
                                     checkpoint; outputs in processed/<KEY>/20_calibration/
-    eiakit peaks KEY [--U V ...] [--max-clicks N] [--deep] [-v]
+    eiakit peaks KEY [--U V ...] [--max-clicks N] [--deep] [--write-state] [--search] [-v]
                                     peak stage (untitled28): refits every voltage with raw SEM
                                     files and an Output_detail file, recovers the U arrow
                                     clicks; outputs in processed/<KEY>/10_peaks/
@@ -329,22 +329,30 @@ def cmd_calibrate(args) -> int:
 def cmd_peaks(args) -> int:
     import pandas as pd
 
-    from .peaks import replay_run
+    from .peaks import load_peak_state, replay_run, update_peak_state
 
     db = load_database()
     paths = get_paths()
     run = db.run(args.key)
     out = paths.processed / run.key / "10_peaks"
     out.mkdir(parents=True, exist_ok=True)
+    state = load_peak_state(db, run.key)
+    if state and not args.search:
+        print(f"using the stored GUI state for {len(state)} voltages "
+              f"(db/legacy_peaks/{run.key}.toml; --search to ignore it)")
     res = replay_run(db, run, paths.data, voltages=args.U, max_clicks=args.max_clicks,
-                     deep=args.deep, deep_lof=args.deep_lof, log=print, verbose=args.verbose)
+                     deep=args.deep, deep_lof=args.deep_lof, log=print, verbose=args.verbose,
+                     state=state, search=args.search)
+    if args.write_state:
+        p, n = update_peak_state(db, run.key, res["summary"])
+        print(f"state: {n} voltage(s) added/improved -> {p}")
     pd.DataFrame(res["summary"]).to_csv(out / "replay_summary.csv", index=False)
     if res["rows"]:
         pd.concat(res["rows"]).to_csv(out / "replay_rows.csv", index=False)
     c = res["counts"]
-    print(f"{run.key}: {c['exact']} exact, {c['equivalent']} equivalent, {c['partial']} partial, "
-          f"{c['skipped']} skipped -> {out}")
-    return 0 if c["partial"] == 0 else 1
+    print(f"{run.key}: {c['exact']} exact, {c['equivalent']} equivalent, {c['partial']} partial "
+          f"({c['known_partial']} known), {c['skipped']} skipped -> {out}")
+    return 0 if c["partial"] == c["known_partial"] else 1
 
 
 def cmd_import_exclusions(args) -> int:
@@ -401,6 +409,9 @@ def main(argv=None) -> int:
                    help="also search LOF arrow clicks and Corr (slow; for 'partial' voltages)")
     p.add_argument("--deep-lof", type=int, default=3, help="LOF clicks searched with --deep")
     p.add_argument("-v", "--verbose", action="store_true", help="also list exact voltages")
+    p.add_argument("--write-state", action="store_true",
+                   help="merge the recovered GUI state into db/legacy_peaks/KEY.toml")
+    p.add_argument("--search", action="store_true", help="ignore the stored state and search")
     p.set_defaults(func=cmd_peaks)
     p = sub.add_parser("import-exclusions", help="legacy ExclusionList.txt -> study [exclude]")
     p.add_argument("file")

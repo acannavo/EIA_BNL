@@ -106,11 +106,13 @@ eiakit db-check                      validate the database
 eiakit files KEY [--list]            raw files picked up / skipped by the run's file format
 eiakit audit [KEY ...] [--study NAME]
                                      audit of the legacy results -> processed\KEY\00_legacy_import
-eiakit peaks KEY [--U V ...] [--max-clicks N] [--deep] [-v]
+eiakit peaks KEY [--U V ...] [--max-clicks N] [--deep] [--write-state] [--search] [-v]
                                      peak stage (untitled28): refits each voltage from the raw
                                      SEM files, recovers the GUI state that was not saved (U
                                      arrow clicks, averaging grid; --deep: LOF clicks, Corr) and
-                                     compares with Output_detail -> processed\KEY\10_peaks
+                                     compares with Output_detail -> processed\KEY\10_peaks;
+                                     --write-state stores the recovered state in
+                                     db\legacy_peaks\KEY.toml (versioned), reused afterwards
 eiakit calibrate KEY [--fc start|stop|both] [--baseline auto|pretrigger|V] [--legacy-cfy]
                                      calibration stage (untitled27), compared with the legacy
                                      checkpoint -> processed\KEY\20_calibration

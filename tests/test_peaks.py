@@ -124,3 +124,25 @@ def test_match_levels():
     new = pd.DataFrame({"m": [92, 92, 92], "z": [1, 2, 3], "TOF": [1e-5, 2e-5, 3.03e-5],
                         "YieldAveFit": [-0.1, -0.2 * (1 + 3e-7), -0.3], "success": True})
     assert list(match_rows(new, old).level) == ["exact", "equivalent", "different"]
+
+
+def test_peak_state_round_trip(tmp_path):
+    import shutil
+
+    from eiakit.peaks import load_peak_state, update_peak_state
+    root = tmp_path / "db"
+    shutil.copytree(db.root, root)
+    db2 = load_database(root)
+    rec = {"U_file": 30.0, "status": "partial", "clicks": -7, "U_used": 29.58000000000001,
+           "grid_n": 9999, "lof_clicks": 0, "LOF_used": 3.8499999999999996, "corr": 0.0,
+           "n_rows": 7, "n_match": 6, "n_exact": 6}
+    update_peak_state(db2, "20250611", [rec])
+    st = load_peak_state(db2, "20250611")["30.0"]
+    assert st["U_used"] == 29.58000000000001 and st["LOF_used"] == 3.8499999999999996
+    assert st["clicks"] == -7 and st["status"] == "partial"
+    # a worse result does not replace it, a better one does
+    _, n = update_peak_state(db2, "20250611", [{**rec, "n_match": 5, "n_exact": 5}])
+    assert n == 0
+    _, n = update_peak_state(db2, "20250611", [{**rec, "status": "exact", "n_match": 7,
+                                                "n_exact": 7}])
+    assert n == 1 and load_peak_state(db2, "20250611")["30.0"]["status"] == "exact"

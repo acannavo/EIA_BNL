@@ -27,6 +27,7 @@ still computed from the file voltage, so the clicks shift only the fit windows (
 from __future__ import annotations
 
 import warnings
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -234,7 +235,7 @@ def match_rows(new: pd.DataFrame, old: pd.DataFrame) -> pd.DataFrame:
 def replay_voltage(traces_by_rep: dict[int, tuple], U_file: float, detail: pd.DataFrame,
                    gui_masses: dict[int, float], L_m: float, eia, profile, settings: dict,
                    grids: tuple = (None,), lof_clicks: tuple = (0,),
-                   corrs: tuple = (0.0,)) -> dict:
+                   corrs: tuple = (0.0,), clicks: tuple | None = None) -> dict:
     """
     Reproduce the legacy fits of one voltage by searching the GUI state that was not
     saved: U arrow clicks (always), averaging-grid length (`grids`, None = longest
@@ -258,7 +259,8 @@ def replay_voltage(traces_by_rep: dict[int, tuple], U_file: float, detail: pd.Da
         for corr in corrs:
             for nl in lof_clicks:
                 lof = gui_lof(L_m, nl, lstep)
-                for n in _click_order(int(settings.get("max_u_clicks", 15))):
+                for n in (clicks if clicks is not None
+                          else _click_order(int(settings.get("max_u_clicks", 15)))):
                     U = gui_voltage(U_file, n, step)
                     fits = _fit_lines(avg, traces_by_rep, reps, U, lines, lof, eia, profile,
                                       settings, corr)
@@ -318,9 +320,11 @@ def shot_check(traces_by_rep: dict[int, tuple], detail: pd.DataFrame) -> dict:
 
 
 def replay_run(db, run, data_root, voltages=None, max_clicks=None, deep=False, deep_lof=3,
-               log=None, verbose=False) -> dict:
+               log=None, verbose=False, state=None, search=False) -> dict:
     """
     Replay every voltage of a run that has raw SEM files and an Output_detail file.
+    state: recovered GUI state per voltage (load_peak_state); voltages in it are refitted
+    with that state only (fast), unless search=True or the stored state no longer works.
     Grid candidates: the run's legacy rule first, then the other one. With deep=True
     also LOF clicks within +/- deep_lof and Corr in {0, 0.005, 0.01, 0.02, 0.03, 0.05}.
     Returns {summary: [dict per voltage], rows: [comparison DataFrames], counts}.
@@ -373,9 +377,20 @@ def replay_run(db, run, data_root, voltages=None, max_clicks=None, deep=False, d
         n_max = max(len(t[0]) for t in traces.values())
         g_prev = prev_len.get(U)
         grids = (g_prev, None) if rule == "previous" else (None, g_prev)
-        r = replay_voltage(traces, U, d, gui_masses, lof0, run.eia, profile, settings,
-                           grids=grids, lof_clicks=lof_clicks, corrs=corrs)
-        if r.get("status") == "partial":
+        st = (state or {}).get(_ukey(U))
+        r = None
+        if st and not search and st.get("status") in ("exact", "equivalent", "partial"):
+            r = replay_voltage(traces, U, d, gui_masses, lof0, run.eia, profile, settings,
+                               grids=(st.get("grid_n"),), lof_clicks=(st["lof_clicks"],),
+                               corrs=(st["corr"],), clicks=(st["clicks"],))
+            if (r.get("n_match", 0), r.get("n_exact", 0)) < (st["n_match"], st["n_exact"]):
+                r = None                       # stored state no longer reproduces: search
+            elif st["status"] == "partial":
+                rec["known"] = st.get("note", "known partial")
+        if r is None:
+            r = replay_voltage(traces, U, d, gui_masses, lof0, run.eia, profile, settings,
+                               grids=grids, lof_clicks=lof_clicks, corrs=corrs)
+        if r.get("status") == "partial" and "known" not in rec:
             others = tuple(n for n in all_lengths() if n not in (g_prev, n_max))
             if others:
                 r2 = replay_voltage(traces, U, d, gui_masses, lof0, run.eia, profile,
@@ -394,7 +409,7 @@ def replay_run(db, run, data_root, voltages=None, max_clicks=None, deep=False, d
             rows.append(r["comparison"].assign(U_file=U, clicks=r["clicks"],
                                                U_used=r["U_used"], grid_n=r["grid_n"]))
         summary.append(rec)
-        if rec["status"] == "exact" and not verbose:
+        if (rec["status"] == "exact" or "known" in rec) and not verbose:
             continue
         extra = ""
         if r.get("grid_n") is not None and r["grid_n"] != n_max:
@@ -422,5 +437,71 @@ def replay_run(db, run, data_root, voltages=None, max_clicks=None, deep=False, d
                     f"(rel {x.dA_rel:.1e})")
     st = [s_.get("status") for s_ in summary]
     counts = {k: st.count(k) for k in ("exact", "equivalent", "partial")}
+    counts["known_partial"] = sum(1 for s_ in summary if "known" in s_)
     counts["skipped"] = len(st) - sum(counts.values())
     return {"summary": summary, "rows": rows, "counts": counts}
+
+
+# ---- recovered GUI state, versioned in db/legacy_peaks/<key>.toml ----------------------
+_RANK = {"exact": 3, "equivalent": 2, "partial": 1}
+
+
+def _ukey(U: float) -> str:
+    return repr(float(U))
+
+
+def peak_state_path(db, key: str) -> Path:
+    return Path(db.root) / "legacy_peaks" / f"{key}.toml"
+
+
+def load_peak_state(db, key: str) -> dict:
+    import tomllib
+    p = peak_state_path(db, key)
+    if not p.is_file():
+        return {}
+    with open(p, "rb") as fh:
+        return tomllib.load(fh).get("voltages", {})
+
+
+def update_peak_state(db, key: str, summary: list[dict]) -> tuple[Path, int]:
+    """Merge the replay results into the state file (keeps the better result per U)."""
+    state = load_peak_state(db, key)
+    notes = {k: v.get("note") for k, v in state.items() if v.get("note")}
+    n = 0
+    for rec in summary:
+        if rec.get("status") not in _RANK:
+            continue
+        k = _ukey(rec["U_file"])
+        old = state.get(k)
+        new = {f: rec[f] for f in ("status", "clicks", "U_used", "grid_n", "lof_clicks",
+                                   "LOF_used", "corr", "n_rows", "n_match", "n_exact")}
+        if old and (_RANK[old["status"]], old["n_match"], old["n_exact"]) >= \
+                (_RANK[new["status"]], new["n_match"], new["n_exact"]):
+            continue
+        state[k] = new
+        n += 1
+    for k, v in notes.items():
+        state[k]["note"] = v
+    p = peak_state_path(db, key)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    lines = [f"# GUI state of untitled28 recovered by `eiakit peaks {key} --write-state`.",
+             "# clicks: U arrow clicks (U/500 each); lof_clicks: LOF arrow clicks (LOF/100);",
+             "# corr: Corr box; grid_n: points of the averaging grid. Generated - edit only",
+             "# the 'note' entries.", ""]
+    for k in sorted(state, key=float):
+        v = state[k]
+        lines.append(f'[voltages."{k}"]')
+        for f in ("status", "clicks", "U_used", "grid_n", "lof_clicks", "LOF_used", "corr",
+                  "n_rows", "n_match", "n_exact", "note"):
+            if f in v and v[f] is not None:
+                val = v[f]
+                if isinstance(val, str):
+                    lines.append(f'{f} = "{val}"')
+                elif isinstance(val, float) and not float(val).is_integer() or f in (
+                        "U_used", "LOF_used", "corr"):
+                    lines.append(f"{f} = {float(val)!r}")
+                else:
+                    lines.append(f"{f} = {int(val)}")
+        lines.append("")
+    p.write_text("\n".join(lines), encoding="utf-8")
+    return p, n

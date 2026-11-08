@@ -54,3 +54,21 @@ def test_legacy_peak_fits_are_replayed(key):
     res = replay_run(db, db.run(key), ROOT)
     partial = [s["U_file"] for s in res["summary"] if s.get("status") == "partial"]
     assert not partial, f"voltages not reproduced: {partial} (run eiakit peaks {key})"
+
+
+@pytest.mark.parametrize("key", [k for k in RUNS
+                                 if (ROOT / k / "2_SEM" / "Output_detail").is_dir()])
+def test_legacy_peak_fits_with_stored_state(key):
+    """Refit with the GUI state in db/legacy_peaks/<key>.toml: nothing may get worse."""
+    from eiakit.peaks import _ukey, load_peak_state, replay_run
+    state = load_peak_state(db, key)
+    if not state:
+        pytest.skip(f"no db/legacy_peaks/{key}.toml (eiakit peaks {key} --write-state)")
+    Us = [float(k) for k in state]
+    res = replay_run(db, db.run(key), ROOT, voltages=Us, state=state)
+    worse = []
+    for s in res["summary"]:
+        old = state[_ukey(s["U_file"])]
+        if s.get("n_match", 0) < old["n_match"] or s.get("n_exact", 0) < old["n_exact"]:
+            worse.append((s["U_file"], old["status"], s.get("status")))
+    assert not worse, worse
