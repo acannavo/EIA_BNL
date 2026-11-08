@@ -379,7 +379,10 @@ def replay_run(db, run, data_root, voltages=None, max_clicks=None, deep=False, d
         grids = (g_prev, None) if rule == "previous" else (None, g_prev)
         st = (state or {}).get(_ukey(U))
         r = None
-        if st and not search and st.get("status") in ("exact", "equivalent", "partial"):
+        # a stored partial is searched again when a deeper search is asked for
+        use_state = st and not search and (st.get("status") in ("exact", "equivalent")
+                                           or (st.get("status") == "partial" and not deep))
+        if use_state:
             r = replay_voltage(traces, U, d, gui_masses, lof0, run.eia, profile, settings,
                                grids=(st.get("grid_n"),), lof_clicks=(st["lof_clicks"],),
                                corrs=(st["corr"],), clicks=(st["clicks"],))
@@ -437,8 +440,8 @@ def replay_run(db, run, data_root, voltages=None, max_clicks=None, deep=False, d
                     f"(rel {x.dA_rel:.1e})")
     st = [s_.get("status") for s_ in summary]
     counts = {k: st.count(k) for k in ("exact", "equivalent", "partial")}
-    counts["known_partial"] = sum(1 for s_ in summary if "known" in s_)
     counts["skipped"] = len(st) - sum(counts.values())
+    counts["known_partial"] = sum(1 for s_ in summary if "known" in s_)
     return {"summary": summary, "rows": rows, "counts": counts}
 
 

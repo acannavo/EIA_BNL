@@ -68,6 +68,8 @@ def test_legacy_peak_fits_with_stored_state(key):
     res = replay_run(db, db.run(key), ROOT, voltages=Us, state=state)
     worse = []
     for s in res["summary"]:
+        if s.get("status") in ("no raw files", "no Output_detail"):
+            continue                                  # data not present on this machine
         old = state[_ukey(s["U_file"])]
         if s.get("n_match", 0) < old["n_match"] or s.get("n_exact", 0) < old["n_exact"]:
             worse.append((s["U_file"], old["status"], s.get("status")))

@@ -132,6 +132,7 @@ def test_peak_state_round_trip(tmp_path):
     from eiakit.peaks import load_peak_state, update_peak_state
     root = tmp_path / "db"
     shutil.copytree(db.root, root)
+    shutil.rmtree(root / "legacy_peaks", ignore_errors=True)   # start without a state
     db2 = load_database(root)
     rec = {"U_file": 30.0, "status": "partial", "clicks": -7, "U_used": 29.58000000000001,
            "grid_n": 9999, "lof_clicks": 0, "LOF_used": 3.8499999999999996, "corr": 0.0,
