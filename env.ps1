@@ -8,6 +8,13 @@
 #                               create .venv and install eiakit + dev tools
 #      . .\env.ps1 -Install -Python "C:\path\to\python.exe"
 #                               use a specific Python (>= 3.11) to create .venv
+#      . .\env.ps1 -Recreate [-Python "C:\path\to\python.exe"]
+#                               delete .venv and build it again (e.g. with another
+#                               Python); implies -Install
+#
+#  Use a python.org Python, not Anaconda's: the venv inherits the base Python's DLL
+#  folder, and Anaconda's older msvcp140.dll breaks PySide6 ("DLL load failed ...
+#  The specified procedure could not be found").
 #
 #  What it does
 #    * sets EIA_DATA_ROOT, EIA_PROCESSED_ROOT, EIA_STUDIES_ROOT (+ MPLBACKEND,
@@ -26,6 +33,7 @@
 
 param(
     [switch]$Install,
+    [switch]$Recreate,
     [string]$Python = ''
 )
 
@@ -63,6 +71,15 @@ foreach ($d in @($env:EIA_PROCESSED_ROOT, $env:EIA_STUDIES_ROOT)) {
 $Venv   = Join-Path $RepoRoot '.venv'
 $VenvPy = Join-Path $Venv 'Scripts\python.exe'
 
+if ($Recreate) {
+    if (Get-Command deactivate -ErrorAction SilentlyContinue) { deactivate }
+    if (Test-Path $Venv) {
+        Write-Host "Removing $Venv"
+        Remove-Item -Recurse -Force $Venv
+    }
+    $Install = $true
+}
+
 if ($Install -and -not (Test-Path $VenvPy)) {
     if ($Python) {
         $cmd = @($Python)
@@ -76,6 +93,14 @@ if ($Install -and -not (Test-Path $VenvPy)) {
     Write-Host "Creating virtual environment with: $($cmd -join ' ')"
     if ($cmd.Count -gt 1) { & $cmd[0] $cmd[1..($cmd.Count - 1)] -m venv $Venv }
     else                  { & $cmd[0] -m venv $Venv }
+    if (Test-Path $VenvPy) {
+        $base = & $VenvPy -c "import sys; print(sys.base_prefix)"
+        Write-Host "  base Python: $base"
+        if ($base -match 'conda') {
+            Write-Warning ("The venv is based on a conda Python ($base). PySide6 (GUI) may fail " +
+                "to load. Prefer a python.org Python: . .\env.ps1 -Recreate -Python <path>")
+        }
+    }
 }
 
 if (Test-Path $VenvPy) {
@@ -83,6 +108,11 @@ if (Test-Path $VenvPy) {
     if ($Install) {
         python -m pip install --upgrade pip
         python -m pip install -e "$RepoRoot[dev]"
+        python -c "import PySide6.QtCore as q; print('  Qt check: PySide6 OK, Qt', q.qVersion())"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning ("PySide6 does not load in this venv (the GUI will not start; figures " +
+                "and the pipeline are not affected). See the note at the top of env.ps1.")
+        }
     }
 } else {
     Write-Warning ".venv not found. Run  . .\env.ps1 -Install  once to create it."

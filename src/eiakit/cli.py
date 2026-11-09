@@ -63,6 +63,12 @@ def cmd_info(_args) -> int:
             v = "MISSING"
         print(f"  {p:<11} {v}")
     try:
+        from PySide6 import QtCore
+        print(f"  Qt check    ok (Qt {QtCore.qVersion()})")
+    except Exception as exc:                       # noqa: BLE001 - report any failure
+        print(f"  Qt check    FAILED: {exc}  (GUI only; see the note at the top of env.ps1)")
+    print(f"  base Python {sys.base_prefix}")
+    try:
         paths = get_paths()
     except PathsNotConfigured as exc:
         print(f"\nPaths: NOT CONFIGURED -- {exc}")
