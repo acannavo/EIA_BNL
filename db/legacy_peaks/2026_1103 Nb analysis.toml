@@ -28,16 +28,16 @@ n_match = 7
 n_exact = 7
 
 [voltages."0.9"]
-status = "partial"
-clicks = 0
-U_used = 0.9
+status = "exact"
+clicks = -9
+U_used = 0.8837999999999998
 grid_n = 100000
 lof_clicks = 0
 LOF_used = 1.22
-corr = 0.0
+corr = 0.02
 n_rows = 7
-n_match = 0
-n_exact = 0
+n_match = 7
+n_exact = 7
 
 [voltages."1.2"]
 status = "partial"
@@ -52,52 +52,52 @@ n_match = 0
 n_exact = 0
 
 [voltages."1.5"]
-status = "partial"
+status = "exact"
 clicks = 0
 U_used = 1.5
 grid_n = 100000
 lof_clicks = 0
 LOF_used = 1.22
-corr = 0.0
+corr = 0.05
 n_rows = 7
-n_match = 0
-n_exact = 0
+n_match = 7
+n_exact = 7
 
 [voltages."2.2"]
-status = "partial"
+status = "exact"
 clicks = 0
 U_used = 2.2
 grid_n = 100000
 lof_clicks = 0
 LOF_used = 1.22
-corr = 0.0
+corr = 0.05
 n_rows = 7
-n_match = 0
-n_exact = 0
+n_match = 7
+n_exact = 7
 
 [voltages."3.2"]
-status = "partial"
-clicks = 0
-U_used = 3.2
+status = "exact"
+clicks = 10
+U_used = 3.264000000000002
 grid_n = 100000
 lof_clicks = 0
 LOF_used = 1.22
-corr = 0.0
+corr = 0.05
 n_rows = 7
-n_match = 0
-n_exact = 0
+n_match = 7
+n_exact = 7
 
 [voltages."4.5"]
-status = "partial"
-clicks = 0
-U_used = 4.5
+status = "exact"
+clicks = 15
+U_used = 4.635000000000005
 grid_n = 100000
 lof_clicks = 0
 LOF_used = 1.22
-corr = 0.0
+corr = 0.02
 n_rows = 11
-n_match = 0
-n_exact = 0
+n_match = 11
+n_exact = 11
 
 [voltages."6.0"]
 status = "partial"
@@ -124,28 +124,28 @@ n_match = 17
 n_exact = 17
 
 [voltages."10.0"]
-status = "partial"
-clicks = 0
-U_used = 10.0
+status = "exact"
+clicks = 8
+U_used = 10.159999999999997
 grid_n = 100000
 lof_clicks = 0
 LOF_used = 1.22
-corr = 0.0
+corr = 0.01
 n_rows = 17
-n_match = 0
-n_exact = 0
+n_match = 17
+n_exact = 17
 
 [voltages."13.0"]
-status = "partial"
-clicks = 0
-U_used = 13.0
+status = "equivalent"
+clicks = 7
+U_used = 13.181999999999999
 grid_n = 100000
 lof_clicks = 0
 LOF_used = 1.22
-corr = 0.0
+corr = 0.02
 n_rows = 17
-n_match = 0
-n_exact = 0
+n_match = 17
+n_exact = 16
 
 [voltages."18.0"]
 status = "exact"
@@ -196,28 +196,28 @@ n_match = 20
 n_exact = 20
 
 [voltages."48.0"]
-status = "partial"
-clicks = 0
-U_used = 48.0
+status = "exact"
+clicks = -4
+U_used = 47.616000000000014
 grid_n = 100000
 lof_clicks = 0
 LOF_used = 1.22
-corr = 0.0
+corr = 0.01
 n_rows = 20
-n_match = 0
-n_exact = 0
+n_match = 20
+n_exact = 20
 
 [voltages."57.0"]
-status = "partial"
-clicks = 0
-U_used = 57.0
+status = "exact"
+clicks = -2
+U_used = 56.772000000000006
 grid_n = 100000
 lof_clicks = 0
 LOF_used = 1.22
-corr = 0.0
+corr = 0.01
 n_rows = 20
-n_match = 0
-n_exact = 0
+n_match = 20
+n_exact = 20
 
 [voltages."67.0"]
 status = "equivalent"
@@ -316,16 +316,16 @@ n_match = 32
 n_exact = 31
 
 [voltages."170.0"]
-status = "partial"
-clicks = 0
-U_used = 170.0
+status = "equivalent"
+clicks = -14
+U_used = 165.23999999999995
 grid_n = 100000
 lof_clicks = 0
 LOF_used = 1.22
-corr = 0.0
+corr = 0.01
 n_rows = 32
-n_match = 0
-n_exact = 0
+n_match = 32
+n_exact = 30
 
 [voltages."186.0"]
 status = "equivalent"
@@ -412,16 +412,16 @@ n_match = 18
 n_exact = 18
 
 [voltages."330.0"]
-status = "partial"
-clicks = 0
-U_used = 330.0
+status = "equivalent"
+clicks = -20
+U_used = 316.7999999999995
 grid_n = 100000
 lof_clicks = 0
 LOF_used = 1.22
 corr = 0.0
 n_rows = 18
-n_match = 0
-n_exact = 0
+n_match = 18
+n_exact = 16
 
 [voltages."360.0"]
 status = "exact"
@@ -448,16 +448,16 @@ n_match = 12
 n_exact = 12
 
 [voltages."450.0"]
-status = "partial"
-clicks = 0
-U_used = 450.0
+status = "equivalent"
+clicks = -16
+U_used = 435.60000000000036
 grid_n = 100000
 lof_clicks = 0
 LOF_used = 1.22
 corr = 0.0
 n_rows = 12
-n_match = 0
-n_exact = 0
+n_match = 12
+n_exact = 11
 
 [voltages."500.0"]
 status = "exact"

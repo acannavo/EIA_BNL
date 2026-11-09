@@ -112,16 +112,16 @@ n_match = 8
 n_exact = 8
 
 [voltages."3.5"]
-status = "partial"
-clicks = 0
-U_used = 3.5
+status = "exact"
+clicks = -7
+U_used = 3.450999999999999
 grid_n = 9999
 lof_clicks = 0
 LOF_used = 3.8499999999999996
-corr = 0.0
+corr = 0.01
 n_rows = 8
-n_match = 0
-n_exact = 0
+n_match = 8
+n_exact = 8
 
 [voltages."4.0"]
 status = "exact"
