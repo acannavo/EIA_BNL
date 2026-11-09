@@ -54,6 +54,17 @@ def to_plotly(fig, max_points: int = 1500):
                         exponentformat="power", **kw, **yk)
         if p.ylim:
             pf.update_yaxes(range=_rng(p.ylim, p.ylog), **kw, **yk)
+        elif p.headroom:
+            ys = [np.asarray(v, float) for t in p.traces if not t.y2
+                  for v in (t.y, getattr(t, "yhi", None), getattr(t, "y_upper", None))
+                  if v is not None]
+            ys = np.concatenate([v[np.isfinite(v)] for v in ys]) if ys else np.array([])
+            if ys.size:
+                lo, hi = float(ys.min()), float(ys.max())
+                pad = (hi - lo) * 0.05
+                rng = (lo - pad, hi + (hi - lo) * p.headroom) if not p.ylog else \
+                    (lo / 1.2, hi * (hi / lo) ** p.headroom)
+                pf.update_yaxes(range=_rng(rng, p.ylog), **kw, **yk)
         if specs[r][c]["secondary_y"]:
             pf.update_yaxes(type="log" if p.y2log else "linear", showgrid=False,
                             tickvals=[1, 2, 3, 5, 10, 20, 30, 50] if p.y2log else None,
@@ -69,7 +80,7 @@ def to_plotly(fig, max_points: int = 1500):
         for tx in p.texts:
             pf.add_annotation(text=("<b>%s</b>" if tx.bold else "%s") % as_html(tx.text),
                               showarrow=False, xref="x domain", yref="y domain", x=tx.x,
-                              y=tx.y, xanchor="left", yanchor="top",
+                              y=tx.y, xanchor=tx.ha, yanchor="top",
                               font=dict(color=tx.color), **kw)
     pf.update_layout(template="simple_white",
                      title=as_html(fig.title) if fig.title else None,

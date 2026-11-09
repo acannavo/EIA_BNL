@@ -85,6 +85,7 @@ class Text:
     size: float = 11
     bold: bool = False
     color: str = "black"
+    ha: str = "left"                     # left | right
 
 
 @dataclass
@@ -104,6 +105,7 @@ class Panel:
     hlines: list = field(default_factory=list)   # (y, color, dash)
     grid: bool = True
     empty_text: str | None = None                # drawn when the panel has no data
+    headroom: float = 0.0                        # extra space above the data (fraction)
 
     def add(self, *traces):
         self.traces.extend(traces)

@@ -35,7 +35,7 @@ def to_matplotlib(fig, font_scale: float = 1.0):
             for y, color, dash in p.hlines:
                 ax.axhline(y, color=color, ls=_DASH.get(dash, dash), lw=0.8)
             for tx in p.texts:
-                ax.text(tx.x, tx.y, as_mpl(tx.text), transform=ax.transAxes, ha="left",
+                ax.text(tx.x, tx.y, as_mpl(tx.text), transform=ax.transAxes, ha=tx.ha,
                         va="top", fontsize=tx.size * font_scale, color=tx.color,
                         fontweight="bold" if tx.bold else "normal")
             ax.set_xscale("log" if p.xlog else "linear")
@@ -44,6 +44,10 @@ def to_matplotlib(fig, font_scale: float = 1.0):
                 ax.set_xlim(*p.xlim)
             if p.ylim:
                 ax.set_ylim(*p.ylim)
+            elif p.headroom:
+                lo, hi = ax.get_ylim()
+                ax.set_ylim(lo, hi * (hi / lo) ** p.headroom if p.ylog and lo > 0
+                            else hi + (hi - lo) * p.headroom)
             if p.title:
                 ax.set_title(as_mpl(p.title))
             if p.xlabel and (not fig.sharex or r == fig.rows - 1):
@@ -73,15 +77,20 @@ def to_matplotlib(fig, font_scale: float = 1.0):
             for c in range(fig.cols):
                 if (r, c) not in fig.panels:
                     axs[r][c].set_visible(False)
-        if fig.title:
-            mfig.suptitle(as_mpl(fig.title))
         handles.sort(key=lambda hn: legend_key(hn[1]))         # stable: others keep order
+        h_in = fig.size_in[1]
+        top = 1.0
+        if fig.title:
+            mfig.suptitle(as_mpl(fig.title), y=0.995, va="top")
+            top -= 0.26 / h_in
         if fig.legend == "figure" and handles:
-            ncol = min(len(handles), max(1, int(np.ceil(len(handles) / 3))))
-            mfig.legend([h for h, _ in handles], [n for _, n in handles], loc="upper center",
-                        ncol=ncol, frameon=False, bbox_to_anchor=(0.5, 1.0))
-            nrow = int(np.ceil(len(handles) / ncol))
-            mfig.tight_layout(rect=(0, 0, 1, 1 - 0.028 * nrow - (0.04 if fig.title else 0)))
+            n = len(handles)
+            ncol = n if n <= 6 else int(np.ceil(n / 3))
+            mfig.legend([h for h, _ in handles], [n_ for _, n_ in handles], loc="upper center",
+                        ncol=ncol, frameon=False, bbox_to_anchor=(0.5, top))
+            nrow = int(np.ceil(n / ncol))
+            top -= nrow * 0.15 / h_in + 0.02 / h_in
+            mfig.tight_layout(rect=(0, 0, 1, top))
         else:
             mfig.tight_layout()
         return mfig

@@ -446,7 +446,7 @@ def cmd_study(args) -> int:
 
     db = load_database()
     paths = get_paths()
-    parts = args.part or ["powerlaw"]
+    parts = args.part or ["powerlaw", "cbs"]
     if args.status:
         for part in parts:
             st = S.study_status(db, args.name, part, paths.data, paths.processed, paths.studies)
@@ -537,7 +537,7 @@ def main(argv=None) -> int:
     p.set_defaults(func=cmd_run)
     p = sub.add_parser("study", help="cross-run figures and tables of a study")
     p.add_argument("name", help="study name (db/studies/<name>.toml)")
-    p.add_argument("--part", nargs="+", choices=["powerlaw"])
+    p.add_argument("--part", nargs="+", choices=["powerlaw", "cbs"])
     p.add_argument("--source", choices=["pipeline", "legacy"], default="pipeline",
                    help="pipeline: calibration stage outputs (default); legacy: checkpoints")
     p.add_argument("--html-only", action="store_true", help="skip PDF / PNG")

@@ -53,3 +53,10 @@ def test_decimate_keeps_extremes():
     y[777] = -3.0
     xd, yd = _decimate(x, y, 1000)
     assert len(xd) <= 1100 and yd.max() == 7.0 and yd.min() == -3.0
+
+
+def test_errorbar_bounds_like_legacy():
+    from eiakit.figures.cbs_study import _bounds
+    u = np.array([100.0, 100.0, 100.0])
+    lo, hi = _bounds(u, np.array([90.0, np.nan, 120.0]), np.array([110.0, 105.0, 95.0]))
+    assert list(lo) == [90.0, 100.0, 95.0] and list(hi) == [110.0, 105.0, 120.0]

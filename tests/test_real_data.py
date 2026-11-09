@@ -107,3 +107,34 @@ def test_zbar_power_law_matches_legacy_script(key):
     new = (f"{f['C']:.4g}", f"{f['b']:.4f}", f"{f['sig_b']:.4f}", f"{f['n']:.3f}",
            f"{f['r2']:.4f}", f"{f['E_lo']:.1f}", f"{f['E_hi']:.1f}", f["npts"])
     assert tuple(float(v) for v in new) == LEGACY_ZBAR[key]
+
+
+# printed by plot_cbs_multipanel_v2.py (mean +/- std km/s, n z) after its remap + exclusions
+LEGACY_CBS_MEANS = {
+    ("u_peak", "20250513", "ultra_fast"): (593.0, 36.5, 7),
+    ("u_peak", "20250513", "fast"): (377.3, 23.5, 11),
+    ("u_peak", "20250611", "fast"): (286.6, 62.2, 13),
+    ("u_pick", "20250513", "fast"): (378.8, 24.0, 11),
+    ("u_pick", "20250611", "fast"): (286.9, 61.9, 13),
+    ("u_peak", "20250602", "ultra_fast"): (513.8, 23.9, 6),
+    ("u_peak", "20250602", "fast"): (337.1, 22.3, 11),
+    ("u_peak", "20250623", "fast"): (211.1, 22.2, 8),
+    ("u_pick", "20250623", "fast"): (210.4, 23.5, 8),
+    ("u_peak", "20250606", "fast"): (288.9, 37.4, 9),
+    ("u_peak", "20250617", "fast"): (151.4, 0.0, 1),
+    ("u_fit", "20250606", "fast"): (286.8, 39.3, 9),
+    ("u_fit", "20250513", "fast"): (379.5, 23.9, 11),
+    ("u_fit", "20250602", "ultra_fast"): (514.6, 23.0, 6),
+}
+
+
+def test_cbs_component_means_match_legacy_script():
+    from eiakit.cbs_study import component_means, study_components
+    st = db.study("PRL_AlNb")
+    if not all((ROOT / k / "EIA-Results").is_dir() for k in st.runs):
+        pytest.skip("not all PRL runs present")
+    tab = study_components(db, "PRL_AlNb", ROOT)
+    for (col, key, comp), (m, s, n) in LEGACY_CBS_MEANS.items():
+        r = component_means(tab, st.avg_components, col, nan_aware=(col != "u_fit"))
+        r = r[(r.run == key) & (r.component == comp)].iloc[0]
+        assert (round(r["mean"], 1), round(r["std"], 1), r["n"]) == (m, s, n), (col, key, comp)

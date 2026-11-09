@@ -109,11 +109,70 @@ def study_status(db, study_name, part, data_root, processed, studies_root) -> di
     if man.get("settings_hash") != sha256_json(st.model_dump(mode="json")):
         reasons.append("study settings changed")
     if man.get("source") == "pipeline":
-        for key in st.all_runs():
+        stage = STAGES[man.get("upstream_stage", "calibration")]
+        for key in man.get("upstream", {}):
             run = db.run(key)
-            m = read_manifest(processed, run, STAGES["calibration"])
+            m = read_manifest(processed, run, stage)
             if m is None or m.get("run_id") != man.get("upstream", {}).get(key):
-                reasons.append(f"calibration of {key} changed or missing")
-        if set(man.get("upstream", {})) != set(st.all_runs()):
+                reasons.append(f"{stage.name} of {key} changed or missing")
+        expected = st.all_runs() if part == "powerlaw" else st.runs
+        if set(man.get("upstream", {})) != set(expected):
             reasons.append("runs of the study changed")
     return {"state": "stale" if reasons else "ok", "reasons": reasons}
+
+
+def cbs(db, study_name, data_root, processed, studies_root, source="pipeline",
+        formats=("pdf", "png"), log=print) -> dict:
+    """CBS component figures (plot_cbs_multipanel_v2): velocity, picks, area_fwhm per laser
+    energy, fit_summary; tables of every component and of the mean +/- std lines."""
+    from .cbs_study import component_means, study_components
+    from .figures import cbs_study as cf
+    from .figures.export import save, write_html_page
+
+    st = db.study(study_name)
+    out = Path(studies_root) / study_name / "cbs"
+    out.mkdir(parents=True, exist_ok=True)
+    tab = study_components(db, study_name, data_root, processed, source)
+    upstream = {}
+    for key in st.runs:
+        m = read_manifest(processed, db.run(key), STAGES["cbs"]) if source == "pipeline" \
+            else None
+        upstream[key] = m["run_id"] if m else f"legacy:{source}"
+    means = pd.concat([component_means(tab, st.avg_components, c, nan_aware=(c != "u_fit"))
+                       for c in ("u_peak", "u_pick", "u_fit")], ignore_index=True)
+    tab.to_csv(out / "components.csv", index=False)
+    means.to_csv(out / "component_means.csv", index=False)
+    for r in means.itertuples():
+        log(f"  {r.species} {r.energy_mJ:>5g} mJ  {r.column:<7} {r.component:<10} "
+            f"{r.mean:7.1f} +/- {r.std:5.1f} km/s ({r.n} z)")
+    energies = sorted({float(e) for e in tab.energy_mJ}, reverse=True)
+    figs = {}
+    for mj in energies:
+        figs[f"velocity_{mj:g}mJ"] = cf.velocity(tab, mj, st.avg_components, "velocity")
+        figs[f"picks_{mj:g}mJ"] = cf.velocity(tab, mj, st.avg_components, "picks")
+        figs[f"area_fwhm_{mj:g}mJ"] = cf.area_fwhm(tab, mj)
+    figs["fit_summary"] = cf.fit_summary(tab, st.avg_components,
+                                        sorted(int(e) for e in energies))
+    for name, f in figs.items():
+        if formats:
+            save(f, out / name, formats=formats)
+    n_ex = int(tab.excluded.sum())
+    items = [("p", f"Study {study_name}, areas from: {source}. Component names from the db "
+                   f"(legacy.cbs_components); {n_ex} (z, component) points excluded "
+                   f"(study [exclude]). Velocities u = L/t with L from each fit-file header."),
+             ("table", means, "mean +/- std of the averaged components")]
+    for mj in energies:
+        items += [("h2", f"{mj:g} mJ"), figs[f"velocity_{mj:g}mJ"], figs[f"picks_{mj:g}mJ"],
+                  figs[f"area_fwhm_{mj:g}mJ"]]
+    items += [("h2", "Fit peak and width, all conditions"), figs["fit_summary"]]
+    meta = (f"eiakit {__version__}, git {git_commit()}, {time.strftime('%Y-%m-%d %H:%M')}"
+            f"; runs: {', '.join(st.runs)}")
+    write_html_page(out / "cbs.html", f"{study_name}: CBS components", items, meta)
+    man = {"study": study_name, "part": "cbs", "source": source,
+           "created": time.strftime("%Y-%m-%d %H:%M:%S"), "eiakit": __version__,
+           "git": git_commit(), "settings_hash": sha256_json(st.model_dump(mode="json")),
+           "upstream": upstream, "upstream_stage": "cbs",
+           "outputs": sorted(p.name for p in out.iterdir() if p.name != "manifest.json")}
+    (out / "manifest.json").write_text(json.dumps(man, indent=2, default=str),
+                                       encoding="utf-8")
+    return {"out": out, "components": tab, "means": means}

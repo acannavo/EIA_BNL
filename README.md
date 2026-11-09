@@ -141,9 +141,10 @@ eiakit status [KEY ...] [-v]         state of every stage of every run: ok / STA
                                      reasons: db values, input files, code, upstream) / -- / FAILED
 eiakit run [KEY ...] [--stage S ...] [--force] [--dry-run]
                                      runs what is missing or stale, in dependency order
-eiakit study NAME [--part powerlaw] [--source pipeline|legacy] [--html-only] [--status]
-                                     cross-run figures and tables of a study (zbar fits, Sheil
-                                     spectra, per-z spectra grids)
+eiakit study NAME [--part powerlaw cbs] [--source pipeline|legacy] [--html-only] [--status]
+                                     cross-run figures and tables of a study: powerlaw (zbar
+                                     fits, Sheil spectra, per-z spectra grids), cbs (peak
+                                     velocity, picks, ions / FWHM, fit summary per component)
 eiakit import-exclusions FILE [--study PRL_AlNb]
                                      convert a legacy ExclusionList.txt to the study's [exclude] table
 ```
