@@ -50,6 +50,7 @@ corr = 0.0
 n_rows = 7
 n_match = 0
 n_exact = 0
+note = "legacy fit not reproduced by the replay (Step 5); refit in Step 11"
 
 [voltages."1.5"]
 status = "exact"
@@ -110,6 +111,7 @@ corr = 0.0
 n_rows = 11
 n_match = 0
 n_exact = 0
+note = "legacy fit not reproduced by the replay (Step 5); refit in Step 11"
 
 [voltages."8.0"]
 status = "exact"
@@ -494,6 +496,7 @@ corr = 0.0
 n_rows = 12
 n_match = 11
 n_exact = 10
+note = "legacy fit not reproduced by the replay (Step 5); refit in Step 11"
 
 [voltages."700.0"]
 status = "partial"
@@ -506,6 +509,7 @@ corr = 0.0
 n_rows = 12
 n_match = 11
 n_exact = 9
+note = "legacy fit not reproduced by the replay (Step 5); refit in Step 11"
 
 [voltages."780.0"]
 status = "exact"
