@@ -17,7 +17,9 @@ def to_matplotlib(fig, font_scale: float = 1.0):
     with mpl.rc_context(prl_rc(font_scale)):
         mfig = MplFigure(figsize=fig.size_in)
         axs = mfig.subplots(fig.rows, fig.cols, squeeze=False, sharex=fig.sharex,
-                            sharey=fig.sharey)
+                            sharey=fig.sharey,
+                            gridspec_kw={"height_ratios": fig.height_ratios}
+                            if fig.height_ratios else None)
         handles, seen = [], set()
         for (r, c), p in sorted(fig.panels.items()):
             ax = axs[r][c]
@@ -67,8 +69,9 @@ def to_matplotlib(fig, font_scale: float = 1.0):
                 hs = [(_proxy(t), as_mpl(t.name)) for t in p.traces if t.name]
                 if hs:
                     ax.legend([h for h, _ in hs], [n for _, n in hs], loc="best")
-            if fig.letters:
-                k = r * fig.cols + c
+            if fig.letters and p.title is not None:
+                k = sum(1 for (rr, cc), pp in sorted(fig.panels.items())
+                        if pp.title is not None and (rr, cc) < (r, c))
                 ax.text(0.03, 0.965, f"({'abcdefghijklmnop'[k]})", transform=ax.transAxes,
                         ha="left", va="top", fontweight="bold", zorder=10,
                         bbox=dict(facecolor="white", alpha=0.8, edgecolor="none",
@@ -93,6 +96,13 @@ def to_matplotlib(fig, font_scale: float = 1.0):
             mfig.tight_layout(rect=(0, 0, 1, top))
         else:
             mfig.tight_layout()
+        for (r, c), p in fig.panels.items():          # residual panels: no gap above
+            if p.attach_above and r > 0:
+                up, ax = axs[r - 1][c].get_position(), axs[r][c].get_position()
+                gap = 0.006
+                ax_new = [ax.x0, up.y0 - gap - ax.height, ax.width, ax.height]
+                axs[r][c].set_position(ax_new)
+                axs[r - 1][c].tick_params(labelbottom=False)
         return mfig
 
 

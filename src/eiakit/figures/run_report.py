@@ -105,3 +105,54 @@ def sheil_single(ds, S: dict, zb: dict) -> Figure:
     if tot.max() > 0:
         p.ylim = (tot.max() * 1e-6, tot.max() * 3)
     return fig
+
+
+def reconstruction(columns: list, margin_frac: float = 0.05) -> Figure:
+    """
+    plot_reconstructed_charge_states_v2: columns of (title, rm, comp_names, [z, ...]);
+    per charge state a main panel (measured points, calibrated curve, every component,
+    total) and a residual panel (curve - total) over the union of the fit windows
+    +/- margin_frac of its span.
+    """
+    nz = max(len(c[3]) for c in columns)
+    fig = Figure(rows=2 * nz, cols=len(columns), size_in=(3.4 * len(columns), 3.2 * nz),
+                 height_px=330 * nz + 120, legend="figure", letters=True,
+                 height_ratios=[3, 1] * nz)
+    for j, (title, rm, names, zs) in enumerate(columns):
+        mo = rm["model"]
+        for k, z in enumerate(zs):
+            pm, pr = fig.panel(2 * k, j), fig.panel(2 * k + 1, j)
+            pm.title = f"{title}, z = {z}+"
+            pm.ylabel = (lab(r"$J_z/z$  (A cm$^{-2}$)", "J_z / z (A cm⁻²)") if rm["per_ion"]
+                         else lab(r"$J_z$  (A cm$^{-2}$)", "J_z (A cm⁻²)")) if j == 0 else None
+            pr.xlabel = T_US
+            pr.ylabel = lab(r"resid. (%)", "resid. (% of peak)") if j == 0 else None
+            pr.attach_above = True
+            cs = [c for c in rm["components"].get(z, []) if c.active]
+            if z not in rm["curves"] or not cs:
+                pm.empty_text = "no components"
+                continue
+            wl = min(c.win_left for c in cs)
+            wr = max(c.win_right for c in cs)
+            span = wr - wl
+            wl, wr = max(wl - margin_frac * span, 1e-3), wr + margin_frac * span
+            sel = (mo.tus >= wl) & (mo.tus <= wr)
+            t, y = mo.tus[sel], rm["curves"][z][sel]
+            if z in rm["exp"]:
+                te, ye = rm["exp"][z]
+                m = (te >= wl) & (te <= wr)
+                pm.add(Points(te[m], ye[m], "raw exp. points", "#9a9a9a", size=2.5))
+            pm.add(Line(t, y, "measured signal", "black", width=1.0, alpha=0.55))
+            tot = np.zeros(t.size)
+            for c in sorted(cs, key=lambda c: c.extra.get("cbs", 0)):
+                name = names.get(c.extra.get("cbs"), f"CBS {c.extra.get('cbs')}")
+                f = c.A * mo.shape(c.kT, c.V0, z)[sel]
+                tot += f
+                pm.add(Line(t, f, COMPONENT_NAMES.get(name, name),
+                            COMPONENT_COLORS.get(name, "#7f7f7f"), width=1.6, group=name))
+            pm.add(Line(t, tot, "CBS total", "black", width=1.4, dash="dash"))
+            pm.xlim = pr.xlim = (wl, wr)
+            peak = float(np.nanmax(np.abs(y))) or 1.0
+            pr.add(Line(t, 100 * (y - tot) / peak, "residual", "#555555", width=0.9))
+            pr.hlines.append((0.0, "black", "dot"))
+    return fig

@@ -54,3 +54,25 @@ def test_summary_peak_and_energy():
     assert r.t_peak_us == pytest.approx(50, abs=0.05)
     assert r.E_peak_keV * 1e3 == pytest.approx(float(energy_eV(ds, r.t_peak_us)), rel=1e-12)
     assert r.EperQ_peak_kV == pytest.approx(r.E_peak_keV / 2)
+
+
+def test_collapse_fit_through_origin_and_joint():
+    from eiakit.collapse import fit_through_origin, weighted_joint
+    z = np.arange(1.0, 11.0)
+    f = fit_through_origin(z, z / 12.5)
+    assert f["zstar"] == pytest.approx(12.5) and f["R2"] == pytest.approx(1.0)
+    j = weighted_joint([10.0, 12.0], [1.0, 1.0])
+    assert j["zstar"] == pytest.approx(11.0) and j["se"] == pytest.approx(1 / np.sqrt(2))
+    assert j["rms_pct"] == pytest.approx(100 / 11)
+
+
+def test_eia_peaks_finds_slow_fast_ultra():
+    from eiakit.collapse import eia_peaks
+    g = lambda t, c, w: np.exp(-((t - c) / w) ** 2)  # noqa: E731
+    ds = _ds({3: lambda t: 0.3 * g(t, 20, 2) + 1.0 * g(t, 40, 3) + 0.8 * g(t, 120, 15)})
+    p = eia_peaks(ds, 0.05, "hwhm").set_index("component")
+    assert p.loc["slow", "t_peak"] == pytest.approx(120, abs=0.1)
+    assert p.loc["fast", "t_peak"] == pytest.approx(40, abs=0.1)
+    assert p.loc["ultra_fast", "t_peak"] == pytest.approx(20, abs=0.1)
+    hw = 3 * np.sqrt(np.log(2))                     # half width of exp(-(x/3)^2)
+    assert p.loc["fast", "t_after"] - p.loc["fast", "t_before"] == pytest.approx(2 * hw, rel=1e-2)

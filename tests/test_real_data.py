@@ -138,3 +138,42 @@ def test_cbs_component_means_match_legacy_script():
         r = component_means(tab, st.avg_components, col, nan_aware=(col != "u_fit"))
         r = r[(r.run == key) & (r.component == comp)].iloc[0]
         assert (round(r["mean"], 1), round(r["std"], 1), r["n"]) == (m, s, n), (col, key, comp)
+
+
+# printed by plot_collapse_v2.py: (z*, se) per dataset and joint, for both peak sources
+LEGACY_COLLAPSE = {
+    "eia": {"20250513": (10.79, 0.53), "20250602": (8.52, 0.24), "20250606": (6.82, 0.24),
+            "20250611": (13.63, 0.25), "20250623": (9.92, 0.36), "joint": (9.65, 0.13)},
+    "cbs": {"20250513": (13.96, 0.34), "20250602": (12.83, 0.17), "20250606": (10.67, 0.13),
+            "20250611": (14.66, 0.18), "20250623": (12.88, 0.38), "joint": (12.36, 0.08)},
+}
+
+
+def test_collapse_matches_legacy_script():
+    import pandas as pd
+
+    from eiakit import collapse as C
+    from eiakit.analysis import load_dataset
+    from eiakit.legacy import load_checkpoint
+    st = db.study("PRL_AlNb")
+    if not all((ROOT / k / "EIA-Results").is_dir() for k in st.runs):
+        pytest.skip("not all PRL runs present")
+    cs = st.collapse
+    prof = {k: db.run(k).legacy.profile_analysis for k in st.runs}
+    masses = {k: db.mass_kg(db.run(k).target, prof[k]) for k in st.runs}
+    e_C = db.e_C(prof[st.runs[0]])
+    pk = []
+    for k in st.runs:
+        ck = load_checkpoint(ROOT / k / "EIA-Results" / "pipeline_checkpoint.npy")
+        pk.append(C.eia_peaks(load_dataset(db, db.run(k), ck, st), cs.peak_min_prom_frac,
+                              cs.peak_err_mode))
+    peaks = {"eia": pd.concat(pk, ignore_index=True),
+             "cbs": pd.concat([C.cbs_peaks(db, db.run(k), ROOT, cs.cbs_t_source)
+                               for k in st.runs], ignore_index=True)}
+    for src, exp in LEGACY_COLLAPSE.items():
+        ser = C.collapse_series(C.drop_excluded(peaks[src], st.exclude), cs.runs, masses, e_C,
+                                cs.min_fast_points)
+        got = {s["run"]: (round(s["zstar"], 2), round(s["se_zstar"], 2)) for s in ser}
+        j = C.weighted_joint([s["zstar"] for s in ser], [s["se_zstar"] for s in ser])
+        got["joint"] = (round(j["zstar"], 2), round(j["se"], 2))
+        assert got == exp, src

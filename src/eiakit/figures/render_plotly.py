@@ -23,12 +23,19 @@ def to_plotly(fig, max_points: int = 1500):
     titles = [as_html(fig.panels[(r, c)].title) if (r, c) in fig.panels else ""
               for r in range(fig.rows) for c in range(fig.cols)]
     if fig.letters:
-        titles = [f"({'abcdefghijklmnop'[k]}) {t}" if t else "" for k, t in enumerate(titles)]
+        k, out = 0, []
+        for t in titles:
+            out.append(f"({'abcdefghijklmnop'[k]}) {t}" if t else "")
+            k += bool(t)
+        titles = out
     height = fig.height_px or int(330 * fig.rows + 140)
     pf = make_subplots(rows=fig.rows, cols=fig.cols, specs=specs, subplot_titles=titles,
                        shared_xaxes=fig.sharex, shared_yaxes=fig.sharey,
                        horizontal_spacing=0.07 if fig.cols > 1 else 0.02,
-                       vertical_spacing=min(0.14, 95 / height) if fig.rows > 1 else 0.02)
+                       vertical_spacing=(min(0.14, (55 if fig.height_ratios else 95) / height)
+                                         if fig.rows > 1 else 0.02),
+                       row_heights=[h / sum(fig.height_ratios) for h in fig.height_ratios]
+                       if fig.height_ratios else None)
     shown = set()
     for (r, c), p in sorted(fig.panels.items()):
         for t in p.traces:

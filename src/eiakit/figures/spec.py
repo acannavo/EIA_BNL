@@ -106,6 +106,7 @@ class Panel:
     grid: bool = True
     empty_text: str | None = None                # drawn when the panel has no data
     headroom: float = 0.0                        # extra space above the data (fraction)
+    attach_above: bool = False                   # glued under the panel above (residuals)
 
     def add(self, *traces):
         self.traces.extend(traces)
@@ -129,6 +130,7 @@ class Figure:
     legend: str = "figure"                       # figure | panel | none
     letters: bool = False                        # (a), (b), ... row by row
     notes: list = field(default_factory=list)    # lines shown under the HTML figure
+    height_ratios: list | None = None            # relative row heights
 
     def panel(self, r: int, c: int) -> Panel:
         return self.panels.setdefault((r, c), Panel())

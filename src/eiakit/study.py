@@ -115,7 +115,9 @@ def study_status(db, study_name, part, data_root, processed, studies_root) -> di
             m = read_manifest(processed, run, stage)
             if m is None or m.get("run_id") != man.get("upstream", {}).get(key):
                 reasons.append(f"{stage.name} of {key} changed or missing")
-        expected = st.all_runs() if part == "powerlaw" else st.runs
+        expected = (st.all_runs() if part == "powerlaw" else st.runs if part == "collapse" else
+                    [p.run for p in st.reconstruction.panels] if part == "reconstruction"
+                    else st.runs)
         if set(man.get("upstream", {})) != set(expected):
             reasons.append("runs of the study changed")
     return {"state": "stale" if reasons else "ok", "reasons": reasons}
@@ -176,3 +178,136 @@ def cbs(db, study_name, data_root, processed, studies_root, source="pipeline",
     (out / "manifest.json").write_text(json.dumps(man, indent=2, default=str),
                                        encoding="utf-8")
     return {"out": out, "components": tab, "means": means}
+
+
+def reconstruction(db, study_name, data_root, processed, studies_root, source="pipeline",
+                   formats=("pdf", "png"), log=print) -> dict:
+    """Representative charge states with their CBS decomposition and residuals
+    (plot_reconstructed_charge_states_v2); component names from the db."""
+    from .cbs import run_model
+    from .figures.export import save, write_html_page
+    from .figures.run_report import reconstruction as recon_fig
+
+    st = db.study(study_name)
+    out = Path(studies_root) / study_name / "reconstruction"
+    out.mkdir(parents=True, exist_ok=True)
+    cols, upstream, rows = [], {}, []
+    for pnl in st.reconstruction.panels:
+        run = db.run(pnl.run)
+        ck, rid = _load_ck(db, run, source, data_root, processed)
+        upstream[run.key] = rid
+        rm = run_model(db, run, data_root, ck)
+        if rm["status"] != "ok":
+            raise RuntimeError(f"{run.key}: {rm}")
+        title = f"{run.target}, {run.laser.energy_mJ:g} mJ"
+        cols.append((title, rm, run.legacy.cbs_components, list(pnl.z)))
+        for z in pnl.z:
+            for c in rm["components"].get(z, []):
+                if c.active:
+                    rows.append({"run": run.key, "z": z, "cbs_file": c.extra.get("cbs"),
+                                 "component": run.legacy.cbs_components.get(c.extra.get("cbs")),
+                                 "kT_eV": c.kT, "V0_V": c.V0, "A": c.A,
+                                 "win_left_us": c.win_left, "win_right_us": c.win_right})
+    tab = pd.DataFrame(rows)
+    tab.to_csv(out / "components.csv", index=False)
+    fig = recon_fig(cols)
+    if formats:
+        save(fig, out / "TOF_reconstruction", formats=formats)
+    write_html_page(out / "reconstruction.html", f"{study_name}: TOF reconstruction",
+                    [("p", f"Source: {source}. Components named from the db "
+                           f"(legacy.cbs_components)."), fig, ("table", tab, "components")],
+                    f"eiakit {__version__}, git {git_commit()}")
+    for r in tab.itertuples():
+        log(f"  {r.run} z = {r.z:>2} {r.component:<10} kT = {r.kT_eV:9.3f} eV  "
+            f"V0 = {r.V0_V:9.3f} V  A = {r.A:.4e}")
+    man = {"study": study_name, "part": "reconstruction", "source": source,
+           "created": time.strftime("%Y-%m-%d %H:%M:%S"), "eiakit": __version__,
+           "git": git_commit(), "settings_hash": sha256_json(st.model_dump(mode="json")),
+           "upstream": upstream,
+           "outputs": sorted(p.name for p in out.iterdir() if p.name != "manifest.json")}
+    (out / "manifest.json").write_text(json.dumps(man, indent=2, default=str),
+                                       encoding="utf-8")
+    return {"out": out, "components": tab}
+
+
+def collapse(db, study_name, data_root, processed, studies_root, source="pipeline",
+             formats=("pdf", "png"), log=print) -> dict:
+    """Velocity collapse u2/u1 = z/z* from the J_z(t) peaks and from the CBS fits
+    (plot_collapse_v2), slow-branch energy scaling, literature, peak-check figures."""
+    from . import collapse as C
+    from .analysis import load_dataset
+    from .figures import collapse as cf
+    from .figures.export import save, write_html_page
+
+    st = db.study(study_name)
+    cs = st.collapse
+    out = Path(studies_root) / study_name / "collapse"
+    out.mkdir(parents=True, exist_ok=True)
+    upstream, dsets, pk = {}, [], []
+    for key in st.runs:
+        run = db.run(key)
+        ck, rid = _load_ck(db, run, source, data_root, processed)
+        upstream[key] = rid
+        ds = load_dataset(db, run, ck, st)
+        dsets.append(ds)
+        pk.append(C.eia_peaks(ds, cs.peak_min_prom_frac, cs.peak_err_mode))
+    peaks = {"eia": C.drop_excluded(pd.concat(pk, ignore_index=True), st.exclude),
+             "cbs": C.drop_excluded(pd.concat([C.cbs_peaks(db, db.run(k), data_root,
+                                                           cs.cbs_t_source)
+                                               for k in st.runs], ignore_index=True),
+                                    st.exclude)}
+    prof = {k: db.run(k).legacy.profile_analysis for k in st.runs}
+    masses = {k: db.mass_kg(db.run(k).target, prof[k]) for k in st.runs}
+    e_C = db.e_C(prof[st.runs[0]])
+    lit = C.literature_series({k: db.literature[k] for k in cs.literature})
+    fits, efits, figs = [], [], {}
+    for src, title in (("eia", "peaks from the J_z(t) curves"), ("cbs", "CBS fit files")):
+        peaks[src].to_csv(out / f"peaks_{src}.csv", index=False)
+        ser = C.collapse_series(peaks[src], cs.runs, masses, e_C, cs.min_fast_points, log)
+        j = C.weighted_joint([s["zstar"] for s in ser], [s["se_zstar"] for s in ser])
+        log(f"  [{title}]")
+        for s in ser:
+            log(f"    {s['element']} {s['energy_mJ']:>4g} mJ: z* = {s['zstar']:.2f} +/- "
+                f"{s['se_zstar']:.2f}  s_phys = {s['s'] * s['u1']:.2f} km/s  u1 = "
+                f"{s['u1']:.1f} km/s  R2 = {s['R2']:.3f} ({len(s['z'])} slow)")
+            fits.append({"source": src, "run": s["run"], "element": s["element"],
+                         "energy_mJ": s["energy_mJ"], "zstar": s["zstar"],
+                         "se_zstar": s["se_zstar"], "s_dim": s["s"], "se_s": s["se_s"],
+                         "s_phys_kms": s["s"] * s["u1"], "u1_kms": s["u1"], "R2": s["R2"],
+                         "n_slow": len(s["z"]), "n_fast": s["n_fast"]})
+            ef = s["efit"]
+            efits.append({"source": src, "run": s["run"],
+                          **{k: v for k, v in ef.items() if k not in ("z", "E2_keV")}})
+        log(f"    joint z* = {j['zstar']:.2f} +/- {j['se']:.2f} ({j['rms_pct']:.0f}% rms, "
+            f"{j['n']} datasets)")
+        fits.append({"source": src, "run": "joint", "zstar": j["zstar"], "se_zstar": j["se"],
+                     "rms_pct": j["rms_pct"], "n_datasets": j["n"]})
+        figs[f"collapse_{src}"] = cf.collapse(ser, j, lit, f"Collapse: {title}")
+        figs[f"peak_check_{src}"] = cf.peak_check(dsets, peaks[src])
+    for L in lit:
+        log(f"  {L['label']}: z* = {L['zstar']:.2f} +/- {L['se_zstar']:.2f}, R2 = {L['R2']:.3f}")
+        fits.append({"source": "literature", "run": L["key"], "zstar": L["zstar"],
+                     "se_zstar": L["se_zstar"], "s_dim": L["s"], "se_s": L["se_s"],
+                     "s_phys_kms": L["s"] * L["u1"], "u1_kms": L["u1"], "R2": L["R2"]})
+    fits_df, ef_df = pd.DataFrame(fits), pd.DataFrame(efits)
+    fits_df.to_csv(out / "collapse_fits.csv", index=False)
+    ef_df.to_csv(out / "energy_fits.csv", index=False)
+    for name, f in figs.items():
+        if formats:
+            save(f, out / name, formats=formats)
+    items = [("p", f"Source: {source}. Collapse u2/u1 = z/z* (fit through the origin); u1 = "
+                   f"mean fast velocity (>= {cs.min_fast_points} fast peaks), u2 = slow peak. "
+                   f"Bars: {cs.peak_err_mode} (curves), prev/next samples (CBS)."),
+             ("table", fits_df, "z* fits"), ("table", ef_df, "slow-branch energy fits (keV)"),
+             ("h2", "Collapse"), figs["collapse_eia"], figs["collapse_cbs"],
+             ("h2", "Peak check"), figs["peak_check_eia"], figs["peak_check_cbs"]]
+    write_html_page(out / "collapse.html", f"{study_name}: velocity collapse", items,
+                    f"eiakit {__version__}, git {git_commit()}")
+    man = {"study": study_name, "part": "collapse", "source": source,
+           "created": time.strftime("%Y-%m-%d %H:%M:%S"), "eiakit": __version__,
+           "git": git_commit(), "settings_hash": sha256_json(st.model_dump(mode="json")),
+           "upstream": upstream,
+           "outputs": sorted(p.name for p in out.iterdir() if p.name != "manifest.json")}
+    (out / "manifest.json").write_text(json.dumps(man, indent=2, default=str),
+                                       encoding="utf-8")
+    return {"out": out, "fits": fits_df, "energy_fits": ef_df}
