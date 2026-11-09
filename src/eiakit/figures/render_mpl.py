@@ -1,8 +1,9 @@
 """spec.Figure -> matplotlib Figure (PRL style)."""
 from __future__ import annotations
 
-import matplotlib.pyplot as plt
+import matplotlib as mpl
 import numpy as np
+from matplotlib.figure import Figure as MplFigure
 from matplotlib.lines import Line2D
 
 from .spec import Band, ErrorBars, Line, Points, as_mpl, legend_key
@@ -12,9 +13,11 @@ _DASH = {"solid": "-", "dash": "--", "dot": ":", "dashdot": "-."}
 
 
 def to_matplotlib(fig, font_scale: float = 1.0):
-    with plt.rc_context(prl_rc(font_scale)):
-        mfig, axs = plt.subplots(fig.rows, fig.cols, figsize=fig.size_in, squeeze=False,
-                                 sharex=fig.sharex, sharey=fig.sharey)
+    # object API, no pyplot: independent of the GUI backend (MPLBACKEND), no window opened
+    with mpl.rc_context(prl_rc(font_scale)):
+        mfig = MplFigure(figsize=fig.size_in)
+        axs = mfig.subplots(fig.rows, fig.cols, squeeze=False, sharex=fig.sharex,
+                            sharey=fig.sharey)
         handles, seen = [], set()
         for (r, c), p in sorted(fig.panels.items()):
             ax = axs[r][c]

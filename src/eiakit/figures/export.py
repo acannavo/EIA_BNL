@@ -4,8 +4,6 @@ from __future__ import annotations
 import html as _html
 from pathlib import Path
 
-import matplotlib.pyplot as plt
-
 from .render_mpl import to_matplotlib
 from .render_plotly import to_plotly
 
@@ -22,7 +20,6 @@ def save(fig, base: Path, formats=("pdf", "png", "html"), dpi: int = 200,
                 p = base.with_suffix(f".{f}")
                 m.savefig(p, dpi=dpi, bbox_inches="tight")
                 out.append(p)
-        plt.close(m)
     if "html" in formats:
         p = base.with_suffix(".html")
         write_html_page(p, str(base.name), [fig])
