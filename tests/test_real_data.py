@@ -74,3 +74,13 @@ def test_legacy_peak_fits_with_stored_state(key):
         if s.get("n_match", 0) < old["n_match"] or s.get("n_exact", 0) < old["n_exact"]:
             worse.append((s["U_file"], old["status"], s.get("status")))
     assert not worse, worse
+
+
+@pytest.mark.parametrize("key", [k for k in RUNS if (ROOT / k / "EIA-Results").is_dir()])
+def test_legacy_cbs_replay(key):
+    """CBS port: areas, fractions, fitted peak / FWHM recomputed within the stored rounding."""
+    from eiakit.cbs import replay_run_cbs
+    res = replay_run_cbs(db, db.run(key), ROOT)
+    if res["status"] == "missing files":
+        pytest.skip("no CBS files / checkpoint")
+    assert res["status"].startswith("reproduced"), res["summary"]

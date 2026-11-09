@@ -18,6 +18,9 @@ Command line entry point:  ``eiakit <command>``
                                     peak stage (untitled28): refits every voltage with raw SEM
                                     files and an Output_detail file, recovers the U arrow
                                     clicks; outputs in processed/<KEY>/10_peaks/
+    eiakit cbs [KEY ...]             CBS stage (cbs_manual_fitter_v12): recomputes areas, fit
+                                    metrics and chi2 from the stored parameters and the
+                                    checkpoint; outputs in processed/<KEY>/30_cbs/
     eiakit import-exclusions FILE [--study NAME]
                                     legacy ExclusionList.txt -> the study's [exclude] table
 """
@@ -355,6 +358,44 @@ def cmd_peaks(args) -> int:
     return 0 if c["partial"] == c["known_partial"] else 1
 
 
+def cmd_cbs(args) -> int:
+    import json
+
+    from .cbs import replay_run_cbs
+
+    db = load_database()
+    paths = get_paths()
+    keys = args.keys or [r.key for r in db.runs()]
+    worst = 0
+    for key in keys:
+        run = db.run(key)
+        res = replay_run_cbs(db, run, paths.data)
+        if res["status"] == "missing files":
+            print(f"{key}: missing files {res['files']}")
+            worst = max(worst, 2)
+            continue
+        s = res["summary"]
+        out = paths.processed / run.key / "30_cbs"
+        out.mkdir(parents=True, exist_ok=True)
+        res["components"].to_csv(out / "replay_components.csv", index=False)
+        res["areas_cmp"].drop(columns="_merge", errors="ignore").to_csv(
+            out / "replay_areas.csv", index=False)
+        res["totals"].to_csv(out / "replay_totals.csv", index=False)
+        (out / "replay_summary.json").write_text(json.dumps(
+            {"status": res["status"], "files": res["files"], **s}, indent=2, default=str))
+        print(f"{key}: {res['status']}")
+        print(f"   {s['n_components']} components ({s['profile']}, M = {s['M_ION_kg']:.6e} kg, "
+              f"L = {s['L_EIA_m']} m); data areas x {s.get('data_area_scale', float('nan')):.7f}"
+              f" (spread {s.get('data_area_spread', float('nan')):.1e}); model areas "
+              f"{s.get('model_area_over_bound', float('nan')):.2f} x rounding bound; FWHM "
+              f"{s['fwhm_over_bound']:.2f} x bound; t_peak_fit <= "
+              f"{s['t_peak_fit_max_steps']:.0f} grid steps")
+        print(f"   origin of kT {s['kT_origin']}, of A {s['A_origin']}  -> {out}")
+        if not res["status"].startswith("reproduced"):
+            worst = max(worst, 1)
+    return worst
+
+
 def cmd_import_exclusions(args) -> int:
     db = load_database()
     excl = import_exclusion_list(Path(args.file), db, args.study)
@@ -413,6 +454,9 @@ def main(argv=None) -> int:
                    help="merge the recovered GUI state into db/legacy_peaks/KEY.toml")
     p.add_argument("--search", action="store_true", help="ignore the stored state and search")
     p.set_defaults(func=cmd_peaks)
+    p = sub.add_parser("cbs", help="CBS stage (cbs_manual_fitter_v12): replay the legacy fits")
+    p.add_argument("keys", nargs="*", help="run keys (default: all included runs)")
+    p.set_defaults(func=cmd_cbs)
     p = sub.add_parser("import-exclusions", help="legacy ExclusionList.txt -> study [exclude]")
     p.add_argument("file")
     p.add_argument("--study", default="PRL_AlNb")

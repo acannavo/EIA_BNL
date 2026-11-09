@@ -116,6 +116,10 @@ eiakit peaks KEY [--U V ...] [--max-clicks N] [--deep] [--write-state] [--search
 eiakit calibrate KEY [--fc start|stop|both] [--baseline auto|pretrigger|V] [--legacy-cfy]
                                      calibration stage (untitled27), compared with the legacy
                                      checkpoint -> processed\KEY\20_calibration
+eiakit cbs [KEY ...]                 CBS stage (cbs_manual_fitter_v12): recomputes areas,
+                                     fractions, fitted peak / FWHM and chi2 from the stored
+                                     (kT, V0, A, window) and the checkpoint, compares with the
+                                     CBS fit / areas files -> processed\KEY\30_cbs
 eiakit import-exclusions FILE [--study PRL_AlNb]
                                      convert a legacy ExclusionList.txt to the study's [exclude] table
 ```
