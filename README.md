@@ -44,6 +44,18 @@ Data layout, one folder per run (`20250513`, `2026_1103 Nb analysis`, ...):
 <run>\EIA-Results         legacy checkpoint and CBS fit files
 ```
 
+Processed layout, one folder per run and stage, each with a `manifest.json` (what the
+stage read - db values, input files with sha256, code, upstream stage - and wrote):
+
+```
+processed\<run>\00_legacy_import   audit of the legacy results
+processed\<run>\10_peaks           untitled28 replay
+processed\<run>\20_calibration     untitled27: spectra.h5 (calibrated spectra), calibration.json
+processed\<run>\30_cbs             CBS stage on the current calibration: cbs_areas.csv, replay_*
+```
+
+Never edit these by hand: `eiakit status` notices it and marks the stage stale.
+
 Folders whose name is a canonical name plus `~`, `_`, `_0`, `_b`, ... (for example
 `Output~`, `EIA-Results_`) or that contain `wrong` are temporary copies with wrong
 results and are ignored. Other folders (`Miscellaneous`, `LowStateCharge`,
@@ -114,12 +126,16 @@ eiakit peaks KEY [--U V ...] [--max-clicks N] [--deep] [--write-state] [--search
                                      --write-state stores the recovered state in
                                      db\legacy_peaks\KEY.toml (versioned), reused afterwards
 eiakit calibrate KEY [--fc start|stop|both] [--baseline auto|pretrigger|V] [--legacy-cfy]
-                                     calibration stage (untitled27), compared with the legacy
-                                     checkpoint -> processed\KEY\20_calibration
+                                     calibration check with other FC choices, compared with
+                                     the legacy checkpoint -> processed\KEY\20_calibration_check
 eiakit cbs [KEY ...]                 CBS stage (cbs_manual_fitter_v12): recomputes areas,
                                      fractions, fitted peak / FWHM and chi2 from the stored
                                      (kT, V0, A, window) and the checkpoint, compares with the
                                      CBS fit / areas files -> processed\KEY\30_cbs
+eiakit status [KEY ...] [-v]         state of every stage of every run: ok / STALE (with the
+                                     reasons: db values, input files, code, upstream) / -- / FAILED
+eiakit run [KEY ...] [--stage S ...] [--force] [--dry-run]
+                                     runs what is missing or stale, in dependency order
 eiakit import-exclusions FILE [--study PRL_AlNb]
                                      convert a legacy ExclusionList.txt to the study's [exclude] table
 ```

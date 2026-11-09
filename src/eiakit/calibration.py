@@ -151,7 +151,10 @@ def recover_fc_baseline(legacy_ck: dict, fc_traces, fc_grid_points: int, eia, fc
     """
     s1 = sum(legacy_ck["corrected_spectra_1m"].values())
     max_val_sum = s1.max() / (legacy_ck["CFY_1m"] * legacy_ck["CFArea"] * legacy_ck["CFCurrent"])
-    fc_peak = legacy_ck["CFY_1m"] * max_val_sum / (1.0 / fc.L_m) ** (-3)
+    # L_FC of the legacy checkpoint, not of the db: the pedestal is a property of the FC
+    # traces, so a later correction of L_FC / aperture in the db must not be absorbed here
+    L_fc = float(legacy_ck.get("L_FC", fc.L_m))
+    fc_peak = legacy_ck["CFY_1m"] * max_val_sum / (1.0 / L_fc) ** (-3)
     _, v = average_fc(fc_traces, fc_grid_points)
     return float(v.max() - fc_peak)
 
@@ -184,3 +187,79 @@ def compare_checkpoints(new: dict, old: dict) -> dict:
         else:
             out[key] = rel(nv, ov)
     return out
+
+
+# ================================================================ run-level stage
+
+def fc_dirs(run, source: str) -> list:
+    fmt = run.acquisition.fc
+    return {"start": [fmt.folder], "stop": [fmt.folder_stop],
+            "both": [fmt.folder, fmt.folder_stop]}[source]
+
+
+def run_calibration(db, run, data_root, fc_source="start", baseline="legacy",
+                    legacy_cfy=False) -> dict:
+    """
+    Calibration stage (untitled27): the FC pedestal is 'legacy' (recovered from the
+    legacy checkpoint, N7), 'pretrigger' (mean before t = 0) or a number in volts.
+    Returns {res, info, legacy} or {error}.
+    """
+    import numpy as np
+
+    from .acquisition import read_trace, scan_folder
+    from .legacy import load_checkpoint, read_output_folder
+
+    folder = run.folder(data_root)
+    pipe = db.pipeline["calibration"]
+    out_dir = folder / run.acquisition.sem.folder / "Output"
+    rows = read_output_folder(out_dir)
+    if rows.empty:
+        return {"error": f"no peak table in {out_dir}"}
+    fmt = run.acquisition.fc
+    traces, used = [], []
+    for d in fc_dirs(run, fc_source):
+        if d is None or not (folder / d).is_dir():
+            continue
+        for p, _, _ in scan_folder(folder / d, fmt).matched:
+            traces.append(read_trace(p, fmt))
+            used.append(f"{d}/{p.name}")
+    ck_path = folder / "EIA-Results" / "pipeline_checkpoint.npy"
+    old = load_checkpoint(ck_path) if ck_path.is_file() else None
+    cfy = None
+    if legacy_cfy:
+        if old is None:
+            return {"error": "legacy CFY needs the legacy checkpoint"}
+        cfy, B, how = old["CFY_1m"], 0.0, "CFY_1m taken from the legacy checkpoint"
+    elif baseline == "legacy":
+        if old is None or not traces:
+            if not traces:
+                return {"error": f"no FC traces in {fc_dirs(run, fc_source)}"}
+            pre = np.concatenate([v[t < 0] for t, v in traces])
+            B, how = float(np.mean(pre)), "pretrigger mean (no legacy checkpoint to recover)"
+        else:
+            B = recover_fc_baseline(old, traces, int(pipe["fc_grid_points"]), run.eia, run.fc)
+            how = "recovered from the legacy checkpoint (N7)"
+    elif baseline == "pretrigger":
+        if not traces:
+            return {"error": f"no FC traces in {fc_dirs(run, fc_source)}"}
+        pre = np.concatenate([v[t < 0] for t, v in traces])
+        B, how = float(np.mean(pre)), f"mean of the FC signal before t = 0 ({pre.size} samples)"
+    else:
+        B, how = float(baseline), "fixed value"
+    if not traces and cfy is None:
+        return {"error": f"no FC traces in {fc_dirs(run, fc_source)}"}
+    res = calibrate(rows, traces, B, run.eia, run.fc, pipe, cfy_1m_override=cfy)
+    info = {"run": run.key, "fc_source": fc_source, "fc_files": used, "fc_baseline_V": B,
+            "baseline_method": how, "fc_peak_V": res["fc_peak_V"], "CFY_1m": res["CFY_1m"],
+            "CFY_EIA": res["CFY_EIA"], "n_output_rows": len(rows),
+            "pairs": len(res["corrected_spectra"]),
+            "settings": {k: pipe[k] for k in ("n_interp", "fc_grid_points", "method",
+                                              "interp_fill")}}
+    if old is not None:
+        diff = compare_checkpoints(res, old)
+        num = [v for v in diff.values() if isinstance(v, float)]
+        info["legacy_comparison"] = {
+            "max_rel_diff": max(num), "per_key": diff,
+            "CFY_ratio_new_over_legacy": float(res["CFY_1m"] / old["CFY_1m"]),
+            "identical_1e-9": all(isinstance(v, float) and v < 1e-9 for v in diff.values())}
+    return {"res": res, "info": info, "legacy": old}

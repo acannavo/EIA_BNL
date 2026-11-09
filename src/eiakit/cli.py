@@ -21,6 +21,12 @@ Command line entry point:  ``eiakit <command>``
     eiakit cbs [KEY ...]             CBS stage (cbs_manual_fitter_v12): recomputes areas, fit
                                     metrics and chi2 from the stored parameters and the
                                     checkpoint; outputs in processed/<KEY>/30_cbs/
+    eiakit status [KEY ...] [--stage S ...] [-v]
+                                    state of each stage: ok / stale (with the reasons: db
+                                    values, input files, code, upstream) / missing / failed
+    eiakit run [KEY ...] [--stage S ...] [--force] [--dry-run]
+                                    runs what is missing or stale, in dependency order;
+                                    each stage writes processed/<KEY>/<stage>/manifest.json
     eiakit import-exclusions FILE [--study NAME]
                                     legacy ExclusionList.txt -> the study's [exclude] table
 """
@@ -31,6 +37,7 @@ import argparse
 import importlib.metadata as md
 import platform
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -248,85 +255,38 @@ def cmd_audit(args) -> int:
 def cmd_calibrate(args) -> int:
     import json
 
-    import numpy as np
-
-    from .acquisition import read_trace, scan_folder
-    from .calibration import calibrate, compare_checkpoints, recover_fc_baseline
-    from .legacy import load_checkpoint, read_output_folder
+    from .calibration import run_calibration
     from .store import save_calibration_h5
 
     db = load_database()
     paths = get_paths()
     run = db.run(args.key)
-    folder = run.folder(paths.data)
-    pipe = db.pipeline["calibration"]
-    rows = read_output_folder(folder / "2_SEM" / "Output")
-    if rows.empty:
-        print(f"ERROR: no peak table in {folder / '2_SEM' / 'Output'}")
+    baseline = "legacy" if args.baseline == "auto" else args.baseline
+    r = run_calibration(db, run, paths.data, args.fc, baseline, legacy_cfy=args.legacy_cfy)
+    if "error" in r:
+        print(f"ERROR: {r['error']}")
         return 2
-    fmt = run.acquisition.fc
-    dirs = {"start": [fmt.folder], "stop": [fmt.folder_stop],
-            "both": [fmt.folder, fmt.folder_stop]}[args.fc]
-    traces, used = [], []
-    for d in dirs:
-        if d is None:
-            continue
-        for p, _, _ in scan_folder(folder / d, fmt).matched:
-            traces.append(read_trace(p, fmt))
-            used.append(f"{d}/{p.name}")
-    ck_path = folder / "EIA-Results" / "pipeline_checkpoint.npy"
-    old = load_checkpoint(ck_path) if ck_path.is_file() else None
-
-    cfy = None
-    if args.legacy_cfy:
-        if old is None:
-            print("ERROR: --legacy-cfy needs the legacy checkpoint")
-            return 2
-        cfy, B, how = old["CFY_1m"], 0.0, "CFY_1m taken from the legacy checkpoint"
-    elif args.baseline == "auto":
-        if old is None or not traces:
-            print("ERROR: --baseline auto needs the legacy checkpoint and FC traces")
-            return 2
-        B = recover_fc_baseline(old, traces, int(pipe["fc_grid_points"]), run.eia, run.fc)
-        how = "recovered from the legacy checkpoint (N7)"
-    elif args.baseline == "pretrigger":
-        pre = np.concatenate([v[t < 0] for t, v in traces])
-        B, how = float(np.mean(pre)), f"mean of the FC signal before t = 0 ({pre.size} samples)"
-    else:
-        B, how = float(args.baseline), "given on the command line"
-    if not traces and cfy is None:
-        print(f"ERROR: no FC traces found in {dirs}")
-        return 2
-
-    res = calibrate(rows, traces, B, run.eia, run.fc, pipe, cfy_1m_override=cfy)
-    out_dir = paths.processed / run.key / "20_calibration"
-    info = {"run": run.key, "fc_files": used, "fc_baseline_V": B, "baseline_method": how,
-            "fc_peak_V": res["fc_peak_V"], "CFY_1m": res["CFY_1m"], "CFY_EIA": res["CFY_EIA"],
-            "n_output_rows": len(rows), "pairs": len(res["corrected_spectra"]),
-            "settings": {k: pipe[k] for k in ("n_interp", "fc_grid_points", "method",
-                                              "interp_fill")}}
-    if old is not None:
-        diff = compare_checkpoints(res, old)
-        num = [v for v in diff.values() if isinstance(v, float)]
-        info["legacy_comparison"] = {"max_rel_diff": max(num), "per_key": diff,
-                                     "identical_1e-9": all(isinstance(v, float) and v < 1e-9
-                                                           for v in diff.values())}
-    save_calibration_h5(out_dir / "spectra.h5", res, {"run": run.key, "baseline_method": how})
+    res, info = r["res"], r["info"]
+    out_dir = paths.processed / run.key / "20_calibration_check"   # not the tracked stage
+    save_calibration_h5(out_dir / "spectra.h5", res,
+                        {"run": run.key, "baseline_method": info["baseline_method"]})
     (out_dir / "calibration.json").write_text(json.dumps(info, indent=2, default=str),
                                               encoding="utf-8")
-    print(f"{run.key} ({run.label}): {len(rows)} peak rows, {len(res['corrected_spectra'])} "
-          f"(m, z) spectra, {len(traces)} FC traces")
-    print(f"  FC baseline {B * 1e3:.4f} mV ({how}); FC peak {res['fc_peak_V'] * 1e3:.4f} mV; "
-          f"CFY_1m = {res['CFY_1m']:.6e}")
-    if old is not None:
-        lc = info["legacy_comparison"]
+    B = info["fc_baseline_V"]
+    print(f"{run.key} ({run.label}): {info['n_output_rows']} peak rows, {info['pairs']} "
+          f"(m, z) spectra, {len(info['fc_files'])} FC traces")
+    print(f"  FC baseline {B * 1e3:.4f} mV ({info['baseline_method']}); FC peak "
+          f"{info['fc_peak_V'] * 1e3:.4f} mV; CFY_1m = {info['CFY_1m']:.6e}")
+    lc = info.get("legacy_comparison")
+    if lc:
         print(f"  legacy checkpoint: max relative difference {lc['max_rel_diff']:.1e} -> "
               f"{'IDENTICAL (< 1e-9)' if lc['identical_1e-9'] else 'DIFFERENT'}")
         for k, v in lc["per_key"].items():
             if not isinstance(v, float) or v >= 1e-9:
                 print(f"    {k}: {v}")
-    print(f"  written: {out_dir / 'spectra.h5'}, calibration.json")
-    return 0 if old is None or info["legacy_comparison"]["identical_1e-9"] else 1
+    print(f"  written: {out_dir / 'spectra.h5'}, calibration.json (a check: the "
+          f"tracked stage is 'eiakit run --stage calibration')")
+    return 0 if not lc or lc["identical_1e-9"] else 1
 
 
 def cmd_peaks(args) -> int:
@@ -396,6 +356,82 @@ def cmd_cbs(args) -> int:
     return worst
 
 
+def _select_runs(db, keys):
+    return [db.run(k) for k in keys] if keys else list(db.runs())
+
+
+def cmd_status(args) -> int:
+    from .pipeline import ORDER, STAGES, stage_status
+
+    db = load_database()
+    paths = get_paths()
+    stages = args.stage or ORDER
+    mark = {"ok": "ok", "missing": "--", "failed": "FAILED", "stale": "STALE"}
+    w = max(len(r.key) for r in _select_runs(db, args.keys)) + 2
+    print(f"{'run':<{w}}" + "".join(f"{s:<14}" for s in stages))
+    details, n_bad = [], 0
+    for run in _select_runs(db, args.keys):
+        cache: dict = {}
+        line = f"{run.key:<{w}}"
+        for name in stages:
+            st = stage_status(db, run, name, paths.data, paths.processed, cache)
+            line += f"{mark[st['state']]:<14}"
+            if st["state"] != "ok":
+                n_bad += 1
+                if st["state"] != "missing" or args.verbose:
+                    details.append((run.key, name, st["reasons"]))
+            elif args.verbose and st["manifest"]:
+                m = st["manifest"]
+                details.append((run.key, name, [f"run {m['created']} (git {m.get('git')}), "
+                                                f"{len(m['inputs'])} inputs, summary "
+                                                f"{m.get('summary')}"]))
+        if run.provisional:
+            line += "  provisional: " + ", ".join(run.provisional)
+        print(line)
+    for key, name, reasons in details:
+        print(f"\n{key} / {name} ({STAGES[name].folder}):")
+        for r in reasons:
+            print(f"   - {r}")
+    if n_bad:
+        print(f"\n{n_bad} stage(s) to run: eiakit run" + (" " + " ".join(
+            f'"{k}"' for k in args.keys) if args.keys else ""))
+    return 0
+
+
+def cmd_run(args) -> int:
+    from .pipeline import plan, run_stage
+
+    db = load_database()
+    paths = get_paths()
+    todo = plan(db, _select_runs(db, args.keys), paths.data, paths.processed,
+                stages=args.stage, force=args.force)
+    if not todo:
+        print("everything is up to date")
+        return 0
+    for run, name, st in todo:
+        why = "; ".join(st["reasons"][:2]) if st["reasons"] else "upstream rerun"
+        print(f"{run.key} / {name}: {st['state']} ({why})")
+    if args.dry_run:
+        return 0
+    from .pipeline import STAGES
+    worst, failed = 0, set()
+    for run, name, _ in todo:
+        blocked = [d for d in STAGES[name].depends if (run.key, d) in failed]
+        if blocked:
+            print(f"  {run.key} / {name}: skipped (upstream {', '.join(blocked)} failed)")
+            failed.add((run.key, name))
+            continue
+        t = time.time()
+        man = run_stage(db, run, name, paths.data, paths.processed)
+        flag = "ok" if man["ok"] else "FAILED"
+        summ = {k: v for k, v in man["summary"].items() if k != "traceback"}
+        print(f"  {run.key} / {name}: {flag} in {time.time() - t:.1f} s  {summ}")
+        if not man["ok"]:
+            worst = 1
+            failed.add((run.key, name))
+    return worst
+
+
 def cmd_import_exclusions(args) -> int:
     db = load_database()
     excl = import_exclusion_list(Path(args.file), db, args.study)
@@ -457,6 +493,17 @@ def main(argv=None) -> int:
     p = sub.add_parser("cbs", help="CBS stage (cbs_manual_fitter_v12): replay the legacy fits")
     p.add_argument("keys", nargs="*", help="run keys (default: all included runs)")
     p.set_defaults(func=cmd_cbs)
+    p = sub.add_parser("status", help="state of every stage of every run (ok / stale / ...)")
+    p.add_argument("keys", nargs="*")
+    p.add_argument("--stage", nargs="+", choices=["audit", "peaks", "calibration", "cbs"])
+    p.add_argument("-v", "--verbose", action="store_true")
+    p.set_defaults(func=cmd_status)
+    p = sub.add_parser("run", help="run the stages that are missing or stale")
+    p.add_argument("keys", nargs="*")
+    p.add_argument("--stage", nargs="+", choices=["audit", "peaks", "calibration", "cbs"])
+    p.add_argument("--force", action="store_true", help="rerun even if up to date")
+    p.add_argument("--dry-run", action="store_true", help="only list what would run")
+    p.set_defaults(func=cmd_run)
     p = sub.add_parser("import-exclusions", help="legacy ExclusionList.txt -> study [exclude]")
     p.add_argument("file")
     p.add_argument("--study", default="PRL_AlNb")

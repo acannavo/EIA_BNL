@@ -446,10 +446,11 @@ def replay_fit_file(model: CBSModel, curves: dict, fit, areas=None) -> dict:
             "totals": pd.DataFrame(tot_rows)}
 
 
-def replay_run_cbs(db, run, data_root) -> dict:
+def replay_run_cbs(db, run, data_root, ck: dict | None = None) -> dict:
     """
-    Legacy replay of the CBS stage of one run: the run's CBS fit / areas files and its
-    checkpoint (EIA-Results). Criteria:
+    Legacy replay of the CBS stage of one run: the run's CBS fit / areas files on a
+    checkpoint - the legacy one in EIA-Results, or `ck` (e.g. the new calibration stage
+    output, then 'data_area_scale' is the change of calibration since the fit). Criteria:
       data areas    equal to print precision (rel 1e-6), or all off by one common factor
                     (the checkpoint was regenerated after the fit: 'stale checkpoint');
       model areas   within twice the bound set by the rounding of the stored (kT, V0, A);
@@ -463,11 +464,14 @@ def replay_run_cbs(db, run, data_root) -> dict:
     fit_p = _find_cbs_file(res, "CBS_fit_results", run.fit_file_labels, run.target)
     area_p = _find_cbs_file(res, "CBS_areas", run.fit_file_labels, run.target)
     ck_p = res / "pipeline_checkpoint.npy"
-    if fit_p is None or not ck_p.is_file():
+    if fit_p is None or (ck is None and not ck_p.is_file()):
         return {"status": "missing files", "files": {"fit": fit_p, "checkpoint": ck_p}}
     fit = parse_cbs_fit_results(fit_p)
     areas = parse_cbs_areas(area_p) if area_p else None
-    ck = load_checkpoint(ck_p)
+    if ck is None:
+        ck = load_checkpoint(ck_p)
+    else:
+        ck_p = "<given>"
     prof = run.legacy.profile_cbs
     m_kg, e_C = db.mass_kg(run.target, prof), db.e_C(prof)
     L = fit.header.L_EIA_m or run.eia.L_m

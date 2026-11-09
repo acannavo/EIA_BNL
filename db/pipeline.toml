@@ -28,6 +28,8 @@ max_u_clicks      = 30        # replay: search the U actually used within +/- th
 [calibration]                 # untitled27_REFACTORED_4
 n_interp          = 100000    # common TOF grid of the EIA spectra
 fc_grid_points    = 1000      # common grid of the FC traces (N7: coarse)
+fc_source         = "start"   # FC traces used: "start" | "stop" | "both"
+fc_baseline       = "legacy"  # FC pedestal: "legacy" (recovered from the legacy checkpoint, N7) | "pretrigger" | volts
 method            = "peak"    # "peak" (legacy, CFY = max FC / max sum EIA) | "area" (I2)
 interp_fill       = "zero"    # "zero" (legacy) | "nan" (I4: mask outside the measured range)
 
