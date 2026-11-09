@@ -84,3 +84,26 @@ def test_legacy_cbs_replay(key):
     if res["status"] == "missing files":
         pytest.skip("no CBS files / checkpoint")
     assert res["status"].startswith("reproduced"), res["summary"]
+
+
+# printed by plot_eia_powerLaw_test.py on the legacy checkpoints (scale-invariant numbers)
+LEGACY_ZBAR = {   # run: (C, b, sig_b, n, R2, E_lo, E_hi, npts)
+    "20250513": (0.3482, 0.3374, 0.0002, 2.964, 0.9709, 20.0, 9999.7, 67765),
+    "20250602": (0.2332, 0.3949, 0.0002, 2.532, 0.9865, 41.3, 9999.6, 66659),
+    "20250606": (0.2353, 0.3844, 0.0002, 2.601, 0.9733, 40.5, 9996.3, 66713),
+    "20250611": (0.1754, 0.3905, 0.0003, 2.561, 0.9836, 98.9, 30974.3, 30124),
+    "20250623": (0.2795, 0.3314, 0.0002, 3.017, 0.9660, 27.3, 30988.4, 68861),
+    "20250617": (0.2809, 0.3416, 0.0003, 2.928, 0.9725, 41.1, 25541.8, 48331),
+}
+
+
+@pytest.mark.parametrize("key", [k for k in LEGACY_ZBAR if (ROOT / k / "EIA-Results").is_dir()])
+def test_zbar_power_law_matches_legacy_script(key):
+    from eiakit.analysis import analyze_zbar, load_dataset
+    from eiakit.legacy import load_checkpoint
+    st = db.study("PRL_AlNb")
+    ck = load_checkpoint(ROOT / key / "EIA-Results" / "pipeline_checkpoint.npy")
+    f = analyze_zbar(load_dataset(db, db.run(key), ck, st), st.zbar)["fit"]
+    new = (f"{f['C']:.4g}", f"{f['b']:.4f}", f"{f['sig_b']:.4f}", f"{f['n']:.3f}",
+           f"{f['r2']:.4f}", f"{f['E_lo']:.1f}", f"{f['E_hi']:.1f}", f["npts"])
+    assert tuple(float(v) for v in new) == LEGACY_ZBAR[key]

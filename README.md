@@ -52,7 +52,12 @@ processed\<run>\00_legacy_import   audit of the legacy results
 processed\<run>\10_peaks           untitled28 replay
 processed\<run>\20_calibration     untitled27: spectra.h5 (calibrated spectra), calibration.json
 processed\<run>\30_cbs             CBS stage on the current calibration: cbs_areas.csv, replay_*
+processed\<run>\40_report          report.html: spectra, CBS decomposition per z, zbar, tables
 ```
+
+Study outputs (`eiakit study NAME`): `studies\<NAME>\<part>\` with PDF + PNG figures (PRL
+style), one interactive HTML page (zoom, click a legend entry to hide it, double-click to
+show only it), CSV tables and a manifest of the run outputs used.
 
 Never edit these by hand: `eiakit status` notices it and marks the stage stale.
 
@@ -136,6 +141,9 @@ eiakit status [KEY ...] [-v]         state of every stage of every run: ok / STA
                                      reasons: db values, input files, code, upstream) / -- / FAILED
 eiakit run [KEY ...] [--stage S ...] [--force] [--dry-run]
                                      runs what is missing or stale, in dependency order
+eiakit study NAME [--part powerlaw] [--source pipeline|legacy] [--html-only] [--status]
+                                     cross-run figures and tables of a study (zbar fits, Sheil
+                                     spectra, per-z spectra grids)
 eiakit import-exclusions FILE [--study PRL_AlNb]
                                      convert a legacy ExclusionList.txt to the study's [exclude] table
 ```

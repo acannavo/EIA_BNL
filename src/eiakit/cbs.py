@@ -446,16 +446,11 @@ def replay_fit_file(model: CBSModel, curves: dict, fit, areas=None) -> dict:
             "totals": pd.DataFrame(tot_rows)}
 
 
-def replay_run_cbs(db, run, data_root, ck: dict | None = None) -> dict:
+def run_model(db, run, data_root, ck: dict | None = None) -> dict:
     """
-    Legacy replay of the CBS stage of one run: the run's CBS fit / areas files on a
-    checkpoint - the legacy one in EIA-Results, or `ck` (e.g. the new calibration stage
-    output, then 'data_area_scale' is the change of calibration since the fit). Criteria:
-      data areas    equal to print precision (rel 1e-6), or all off by one common factor
-                    (the checkpoint was regenerated after the fit: 'stale checkpoint');
-      model areas   within twice the bound set by the rounding of the stored (kT, V0, A);
-      FWHM_fit      same; t_peak_fit within 3 grid steps (argmax on a flat top).
-    Returns {status, summary, components, areas_cmp, totals, files}.
+    The CBS setting of a run: model (mass, e, L from the run's legacy CBS profile and the
+    fit-file header), per-z signals of the checkpoint (`ck` or the legacy one), and the
+    stored components. Returns {status, model, curves, exp, fit, areas, components, ...}.
     """
     from .audit import _find_cbs_file
     from .legacy import load_checkpoint, parse_cbs_areas, parse_cbs_fit_results
@@ -476,8 +471,30 @@ def replay_run_cbs(db, run, data_root, ck: dict | None = None) -> dict:
     m_kg, e_C = db.mass_kg(run.target, prof), db.e_C(prof)
     L = fit.header.L_EIA_m or run.eia.L_m
     per_ion = True if fit.header.per_ion is None else fit.header.per_ion
-    tof, curves, _ = build_signals(ck, run.mass_labels, per_ion)
+    tof, curves, exp = build_signals(ck, run.mass_labels, per_ion)
     model = CBSModel.from_settings(tof, m_kg, L, e_C, db.pipeline["cbs"])
+    return {"status": "ok", "model": model, "curves": curves, "exp": exp, "fit": fit,
+            "areas": areas, "components": components_from_fit_file(fit), "profile": prof,
+            "per_ion": per_ion, "fit_path": fit_p, "areas_path": area_p, "ck_path": ck_p}
+
+
+def replay_run_cbs(db, run, data_root, ck: dict | None = None) -> dict:
+    """
+    Legacy replay of the CBS stage of one run: the run's CBS fit / areas files on a
+    checkpoint - the legacy one in EIA-Results, or `ck` (e.g. the new calibration stage
+    output, then 'data_area_scale' is the change of calibration since the fit). Criteria:
+      data areas    equal to print precision (rel 1e-6), or all off by one common factor
+                    (the checkpoint was regenerated after the fit: 'stale checkpoint');
+      model areas   within twice the bound set by the rounding of the stored (kT, V0, A);
+      FWHM_fit      same; t_peak_fit within 3 grid steps (argmax on a flat top).
+    Returns {status, summary, components, areas_cmp, totals, files}.
+    """
+    rm = run_model(db, run, data_root, ck)
+    if rm["status"] == "missing files":
+        return rm
+    model, curves, fit, areas = rm["model"], rm["curves"], rm["fit"], rm["areas"]
+    prof, m_kg, L, fit_p, area_p, ck_p = (rm["profile"], model.m_kg, model.L_m, rm["fit_path"],
+                                         rm["areas_path"], rm["ck_path"])
     out = replay_fit_file(model, curves, fit, areas)
     comp, a = out["components"], out["areas_cmp"]
     dt = float(np.median(np.diff(model.tus)))

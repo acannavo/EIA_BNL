@@ -300,6 +300,81 @@ def _cbs_execute(db, run, ctx):
         "data_area_scale_vs_legacy_fit": s.get("data_area_scale")}
 
 
+# report -------------------------------------------------------------------------------
+
+def study_of(db, run):
+    """The first study (alphabetical) that lists the run, or None."""
+    for name in sorted(db.studies):
+        st = db.study(name)
+        if run.key in st.runs or run.key in st.extra_runs:
+            return st
+    return None
+
+
+def _report_params(db, run):
+    st = study_of(db, run)
+    return {"pipeline.analysis": db.pipeline.get("analysis", {}),
+            "constants": _jsonable(db.profile(run.legacy.profile_analysis)),
+            "study": None if st is None else {"name": st.name,
+                                              "zbar": _jsonable(st.zbar),
+                                              "exclude": st.exclude.get(run.key, {})},
+            "cbs_components": {str(k): v for k, v in run.legacy.cbs_components.items()},
+            "run": {"target": run.target, "label": run.label,
+                    "laser": _jsonable(run.laser), "mass_labels": run.mass_labels}}
+
+
+def _report_inputs(db, run, data_root, ins):
+    _cbs_inputs(db, run, data_root, ins)
+
+
+def _report_execute(db, run, ctx):
+    import pandas as pd
+
+    from .analysis import analyze_zbar, compute_sheil, load_dataset, summarize
+    from .cbs import run_model
+    from .figures import run_report as rr
+    from .figures.export import write_html_page
+    from .store import load_calibration_h5
+
+    ck = load_calibration_h5(ctx.upstream_out["calibration"] / "spectra.h5")
+    st = study_of(db, run)
+    ds = load_dataset(db, run, ck, st)
+    summ = summarize(ds)
+    a = analyze_zbar(ds, st.zbar) if st is not None else {
+        "zb": None, "fit": None}
+    items = []
+    meta = (f"{run.target}, laser {run.laser.energy_mJ} mJ, L_EIA = {run.eia.L_m} m, "
+            f"L_FC = {run.fc.L_m} m; profile {run.legacy.profile_analysis}"
+            + (f"; excluded z {ds.excluded_z} (study {st.name})" if st and ds.excluded_z else "")
+            + (f"; <b>provisional: {', '.join(run.provisional)}</b>" if run.provisional else "")
+            + f"<br>eiakit {__version__}, git {git_commit()}, {time.strftime('%Y-%m-%d %H:%M')}")
+    items.append(rr.spectra_overview(ds))
+    rm = run_model(db, run, ctx.data_root, ck)
+    areas = None
+    if rm["status"] == "ok":
+        items += [("h2", "CBS decomposition per charge state"),
+                  ("p", "Stored legacy CBS parameters (kT, V0, A, windows) on the current "
+                        "calibration. Shaded: fit windows. Toggle a component in the legend."),
+                  rr.cbs_panels(rm, run.legacy.cbs_components)]
+        p = ctx.upstream_out["cbs"] / "cbs_areas.csv"
+        if p.is_file():
+            areas = pd.read_csv(p)
+            cols = ["z", "CBS", "t_peak_fit_us", "FWHM_fit_us", "Area_model", "Fraction",
+                    "Ions_model_full_cm2", "Ions_data_win_cm2", "Win_coverage", "win_src"]
+            items.append(("table", areas[[c for c in cols if c in areas]], "CBS areas"))
+    if a["zb"] is not None:
+        S = compute_sheil(ds)
+        items += [("h2", "Average charge state and energy spectra"),
+                  rr.zbar_single(ds, a["zb"], a["fit"]), rr.sheil_single(ds, S, a["zb"])]
+    items += [("h2", "Per charge state"), ("table", summ, "peak, centroid, area per z")]
+    write_html_page(ctx.out / "report.html", f"{run.key}: {run.label}", items, meta)
+    summ.to_csv(ctx.out / "summary_per_z.csv", index=False)
+    f = a.get("fit") or {}
+    return True, {"zbar_fit": {k: f.get(k) for k in ("C", "b", "n", "r2")} if f else None,
+                  "charge_states": len(ds.all_z), "cbs_components": 0 if areas is None
+                  else int(len(areas))}
+
+
 STAGES: dict[str, Stage] = {s.name: s for s in [
     Stage("audit", "00_legacy_import", [], ["audit", "legacy", "db"], _audit_params,
           _audit_inputs, _audit_execute, "audit of the legacy results"),
@@ -311,8 +386,12 @@ STAGES: dict[str, Stage] = {s.name: s for s in [
     Stage("cbs", "30_cbs", ["calibration"], ["cbs", "physics", "legacy", "store"],
           _cbs_params, _cbs_inputs, _cbs_execute,
           "cbs_manual_fitter_v12: legacy CBS parameters on the current calibration"),
+    Stage("report", "40_report", ["calibration", "cbs"],
+          ["analysis", "cbs", "store", "figures/run_report", "figures/export",
+           "figures/render_plotly", "figures/spec", "figures/style", "figures/powerlaw"],
+          _report_params, _report_inputs, _report_execute, "per-run HTML report"),
 ]}
-ORDER = ["audit", "peaks", "calibration", "cbs"]
+ORDER = ["audit", "peaks", "calibration", "cbs", "report"]
 
 
 # ---- status ----------------------------------------------------------------------------

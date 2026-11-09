@@ -27,6 +27,9 @@ Command line entry point:  ``eiakit <command>``
     eiakit run [KEY ...] [--stage S ...] [--force] [--dry-run]
                                     runs what is missing or stale, in dependency order;
                                     each stage writes processed/<KEY>/<stage>/manifest.json
+    eiakit study NAME [--part P ...] [--source pipeline|legacy] [--html-only] [--status]
+                                    cross-run figures (PDF, PNG, one HTML page) and tables
+                                    in studies/<NAME>/<part>/
     eiakit import-exclusions FILE [--study NAME]
                                     legacy ExclusionList.txt -> the study's [exclude] table
 """
@@ -432,6 +435,28 @@ def cmd_run(args) -> int:
     return worst
 
 
+def cmd_study(args) -> int:
+    from . import study as S
+
+    db = load_database()
+    paths = get_paths()
+    parts = args.part or ["powerlaw"]
+    if args.status:
+        for part in parts:
+            st = S.study_status(db, args.name, part, paths.data, paths.processed, paths.studies)
+            print(f"{args.name} / {part}: {st['state']}")
+            for r in st["reasons"]:
+                print(f"   - {r}")
+        return 0
+    fmts = () if args.html_only else ("pdf", "png")
+    for part in parts:
+        print(f"{args.name} / {part} (source: {args.source})")
+        res = getattr(S, part)(db, args.name, paths.data, paths.processed, paths.studies,
+                               source=args.source, formats=fmts)
+        print(f"  -> {res['out']}")
+    return 0
+
+
 def cmd_import_exclusions(args) -> int:
     db = load_database()
     excl = import_exclusion_list(Path(args.file), db, args.study)
@@ -495,15 +520,23 @@ def main(argv=None) -> int:
     p.set_defaults(func=cmd_cbs)
     p = sub.add_parser("status", help="state of every stage of every run (ok / stale / ...)")
     p.add_argument("keys", nargs="*")
-    p.add_argument("--stage", nargs="+", choices=["audit", "peaks", "calibration", "cbs"])
+    p.add_argument("--stage", nargs="+", choices=["audit", "peaks", "calibration", "cbs", "report"])
     p.add_argument("-v", "--verbose", action="store_true")
     p.set_defaults(func=cmd_status)
     p = sub.add_parser("run", help="run the stages that are missing or stale")
     p.add_argument("keys", nargs="*")
-    p.add_argument("--stage", nargs="+", choices=["audit", "peaks", "calibration", "cbs"])
+    p.add_argument("--stage", nargs="+", choices=["audit", "peaks", "calibration", "cbs", "report"])
     p.add_argument("--force", action="store_true", help="rerun even if up to date")
     p.add_argument("--dry-run", action="store_true", help="only list what would run")
     p.set_defaults(func=cmd_run)
+    p = sub.add_parser("study", help="cross-run figures and tables of a study")
+    p.add_argument("name", help="study name (db/studies/<name>.toml)")
+    p.add_argument("--part", nargs="+", choices=["powerlaw"])
+    p.add_argument("--source", choices=["pipeline", "legacy"], default="pipeline",
+                   help="pipeline: calibration stage outputs (default); legacy: checkpoints")
+    p.add_argument("--html-only", action="store_true", help="skip PDF / PNG")
+    p.add_argument("--status", action="store_true", help="only say whether it is up to date")
+    p.set_defaults(func=cmd_study)
     p = sub.add_parser("import-exclusions", help="legacy ExclusionList.txt -> study [exclude]")
     p.add_argument("file")
     p.add_argument("--study", default="PRL_AlNb")
