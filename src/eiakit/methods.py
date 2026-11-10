@@ -428,8 +428,11 @@ INTRO = {
             "zbar_fill, zbar_mask, zbar_clip_negative, zbar_min_frac.",
     "calibration": "I2: CFY from the peak (legacy) or from the area of the summed EIA "
                    "matched to the FC over the time range both cover (both scaled to 1 m). The "
-                   "overlay shows the FC and the EIA over the whole trace. Switch: "
-                   "[calibration] method.",
+                   "overlay shows the FC and the EIA over the whole trace. The area match is "
+                   "sensitive to the FC pedestal (an offset of 0.1 mV over a 30 us record "
+                   "is comparable to a weak ion signal) and to everything the FC sees that "
+                   "the EIA mass list does not (electrons, other species, z beyond the "
+                   "fitted ones). Switch: [calibration] method.",
     "sensitivity": "Flight length +/- 1 % and time zero +/- 50 ns (t_true = t - t0): z̄ "
                    "fits and z* of the collapse (CBS peaks).",
     "fc": "Faraday cup start / stop / both: CFY and the peak of every shot (moving average "

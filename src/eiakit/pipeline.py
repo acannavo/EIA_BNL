@@ -270,6 +270,10 @@ def _cal_execute(db, run, ctx):
     return True, {"CFY_1m": float(r["info"]["CFY_1m"]),
                   "fc_baseline_V": float(r["info"]["fc_baseline_V"]),
                   "CFY_ratio_new_over_legacy": lc.get("CFY_ratio_new_over_legacy"),
+                  **({"fc_peak_t_us": round(r["info"]["fc_peak_t_s"] * 1e6, 3)}
+                     if r["info"].get("fc_peak_t_s") is not None else {}),
+                  **({"WARNING": r["info"]["fc_peak_warning"]}
+                     if r["info"].get("fc_peak_warning") else {}),
                   "identical_to_legacy": lc.get("identical_1e-9")}
 
 

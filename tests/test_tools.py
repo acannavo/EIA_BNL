@@ -36,3 +36,24 @@ def test_peak_picker_and_baseline_merge_into_calibration(tmp_path, monkeypatch):
     db.pipeline["calibration"]["fc_baseline"] = "picked"
     c = run_calibration(db, run, ROOT, "start", "picked")
     assert c["info"]["fc_baseline_V"] == 4.5e-4 and c["info"]["peak_overrides_U"] == [35.0]
+
+
+def test_legacy_pedestal_with_other_fc_sources(monkeypatch, tmp_path):
+    """fc_source != start with the legacy pedestal: per-trace pre-trigger + the legacy offset.
+    Here 3_FC_Stop of 20250611 may be empty: 'both' = the start traces -> the legacy CFY."""
+    from eiakit.calibration import run_calibration
+    from eiakit.db import load_database
+    monkeypatch.setenv("EIA_FITS_ROOT", str(tmp_path))
+    db = load_database()
+    run = db.run("20250611")
+    db.pipeline["calibration"]["output_duplicates"] = "all"
+    db.pipeline["calibration"]["overlaps"] = "keep_both"
+    a = run_calibration(db, run, ROOT, "start", "legacy")
+    stop_dir = ROOT / "20250611" / "3_FC_Stop"
+    if stop_dir.is_dir() and any(stop_dir.iterdir()):
+        pytest.skip("stop traces present: 'both' differs from 'start' by design")
+    b = run_calibration(db, run, ROOT, "both", "legacy")
+    assert abs(a["info"]["CFY_1m"] / b["info"]["CFY_1m"] - 1) < 1e-9
+    assert "per trace" in b["info"]["baseline_method"]
+    assert a["info"]["fc_peak_t_s"] > 1e-6 and not a["info"].get("fc_peak_warning")
+    assert all(p > 0.02 for p in a["info"]["fc_per_shot_peak_V"])     # ion peaks, not pickup

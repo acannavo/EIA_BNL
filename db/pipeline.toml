@@ -30,7 +30,7 @@ n_interp          = 100000    # common TOF grid of the EIA spectra
 fc_grid_points    = 1000      # common grid of the FC traces: 1000 (legacy, N7: 40 ns, peak -1 %) | "native" (scope sampling)
 fc_peak           = "max"     # FC peak: "max" of the average (legacy) | "smoothed" (max after a moving average of fc_smooth_s)
 fc_smooth_s       = 5.0e-8    # moving-average width for fc_peak = "smoothed" and the per-shot peaks
-# fc_peak_t_min_s = 1.0e-6    # FC peak searched at t >= this; unset = whole trace (legacy). The laser pickup at t ~ 0 reaches 30 mV in 20250611
+fc_peak_t_min_s   = 1.0e-6    # FC peak searched at t >= this (unset = whole trace, legacy): the laser pickup at t ~ 0 reaches 30 mV (20250611) and exceeds the ion peak in the 20250617 stop traces; all 2025 start peaks are at 6-16 us
 fc_source         = "start"   # FC traces used: "start" | "stop" | "both"
 fc_baseline       = "legacy"  # FC pedestal: "legacy" (recovered from the legacy checkpoint, N7) | "pretrigger" | "picked" (baseline tool, else legacy) | volts
 fc_missing        = "error"   # no FC traces: "error" | "legacy_cfy" (CFY_1m of the legacy checkpoint) | "legacy_fc_peak" (FC peak of the legacy checkpoint: CFY follows changes of the EIA side)

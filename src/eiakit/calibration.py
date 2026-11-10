@@ -196,11 +196,14 @@ def legacy_fc_peak(legacy_ck: dict, fc) -> float:
 
 
 def _per_shot_peaks(traces, baseline_V: float, pipe: dict) -> list:
-    """Peak of every FC shot after the pedestal, moving average of fc_smooth_s (drift check)."""
+    """Peak of every FC shot after the pedestal (moving average of fc_smooth_s), searched
+    at t >= fc_peak_t_min_s (at least 1 us: the laser pickup at t ~ 0); drift check."""
+    tmin = max(float(pipe.get("fc_peak_t_min_s") or 0.0), 1e-6)
     out = []
     for t, v in traces:
         w = max(1, int(round(float(pipe.get("fc_smooth_s", 5e-8)) / float(np.median(np.diff(t))))))
-        out.append(float(np.convolve(v - baseline_V, np.ones(w) / w, mode="same").max()))
+        sm = np.convolve(v - baseline_V, np.ones(w) / w, mode="same")
+        out.append(float(sm[t >= tmin].max()) if (t >= tmin).any() else float("nan"))
     return out
 
 
@@ -353,11 +356,28 @@ def run_calibration(db, run, data_root, fc_source="start", baseline="legacy",
                 return {"error": f"no FC traces in {fc_dirs(run, fc_source)}"}
             pre = np.concatenate([v[t < 0] for t, v in traces])
             B, how = float(np.mean(pre)), "pretrigger mean (no legacy checkpoint to recover)"
-        else:
+        elif fc_source == "start":
             # on the legacy grid: the pedestal is what untitled27 used; a finer grid or
             # another peak estimator (N7) must change the FC peak, not the pedestal
             B = recover_fc_baseline(old, traces, LEGACY_FC_GRID, run.eia, run.fc)
             how = "recovered from the legacy checkpoint (N7)"
+        else:
+            # the legacy pedestal belongs to the start traces (untitled27 used only those):
+            # recovered there, its offset from their pre-trigger mean is applied on top of
+            # each trace's own pre-trigger mean (otherwise the recovery would absorb every
+            # start / stop difference into the pedestal)
+            start = [read_trace(p, fmt) for d in fc_dirs(run, "start")
+                     if d and (folder / d).is_dir()
+                     for p, _, _ in scan_folder(folder / d, fmt).matched]
+            if not start:
+                return {"error": "legacy pedestal with fc_source != start needs the start "
+                                 "traces"}
+            B0 = recover_fc_baseline(old, start, LEGACY_FC_GRID, run.eia, run.fc)
+            delta = B0 - float(np.mean(np.concatenate([v[t < 0] for t, v in start])))
+            traces = [(t, v - (float(np.mean(v[t < 0])) + delta)) for t, v in traces]
+            B = 0.0
+            how = (f"per trace: pre-trigger mean + {delta * 1e3:.4f} mV (offset of the legacy "
+                   f"pedestal on the start traces)")
     elif baseline == "pretrigger":
         if not traces:
             return {"error": f"no FC traces in {fc_dirs(run, fc_source)}"}
