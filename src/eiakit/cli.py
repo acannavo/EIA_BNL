@@ -37,6 +37,10 @@ Command line entry point:  ``eiakit <command>``
     eiakit compare NAME KEY A B [--changelog TITLE] [--text TEXT]
                                     effect of one setting: run + snapshot with KEY = A, then
                                     B, diff (+ changelog); no file to edit
+    eiakit methods NAME [--only P ...] [--boot N]
+                                    method studies (Step 12) -> studies/<NAME>/methods/:
+                                    zbar (I4/I5), calibration (I2), sensitivity (LOF, t0),
+                                    fc (start/stop drift), shots (N12 bootstrap)
     eiakit note NAME TITLE [--text TEXT]
                                     changelog section for a check that changed no number
     eiakit --set SECTION.KEY=VALUE <command>
@@ -566,6 +570,20 @@ def cmd_import_exclusions(args) -> int:
     return 0
 
 
+def cmd_methods(args) -> int:
+    from .methods import run_methods
+    db = _load_db()
+    paths = get_paths()
+    if args.name not in db.studies:
+        print(f"ERROR: no study {args.name!r}")
+        return 2
+    print(f"{args.name} / methods (source: {args.source})")
+    r = run_methods(db, args.name, paths.data, paths.processed, paths.studies, args.only,
+                    args.source, () if args.html_only else ("pdf", "png"), args.boot)
+    print(f"-> {r['out'] / 'methods.html'}")
+    return 0
+
+
 def _append_changelog(paths, name: str, entry: str):
     log = paths.studies / name / "changelog.md"
     log.parent.mkdir(parents=True, exist_ok=True)
@@ -704,6 +722,14 @@ def main(argv=None) -> int:
     p.add_argument("--force", action="store_true",
                    help="write the changelog entry even if nothing changed")
     p.set_defaults(func=cmd_diff)
+    p = sub.add_parser("methods", help="method studies (Step 12): zbar, calibration, ...")
+    p.add_argument("name")
+    p.add_argument("--only", nargs="+",
+                   choices=["zbar", "calibration", "sensitivity", "fc", "shots"])
+    p.add_argument("--boot", type=int, default=30, help="bootstrap samples (shots)")
+    p.add_argument("--source", choices=["pipeline", "legacy"], default="pipeline")
+    p.add_argument("--html-only", action="store_true")
+    p.set_defaults(func=cmd_methods)
     p = sub.add_parser("note", help="append a changelog section without numbers")
     p.add_argument("name")
     p.add_argument("title")

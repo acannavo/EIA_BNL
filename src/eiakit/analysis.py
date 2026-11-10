@@ -128,21 +128,77 @@ def summarize(ds: Dataset) -> pd.DataFrame:
 
 # ---- average charge state ---------------------------------------------------------------
 
-def compute_zbar(ds: Dataset, jacobian: bool = False, z_list=None, min_frac: float = 0.0):
+def missing_ions(ds: Dataset, t_us, zs=None, mode: str = "edge"):
+    """I4: signal of each z outside its measured range, which the zero fill of untitled27
+    drops (same units as the curves). mode 'edge': continued at its value at the first /
+    last measured point (upper bound, the spectra decay outwards); 'extrapolate': power law
+    in t through the 3 outer points, decaying at least as t^+1 (early side) / t^-1 (late)."""
+    t_us = np.asarray(t_us)
+    miss = np.zeros(t_us.shape)
+    for z, (te, ye) in ds.z_exp.items():
+        if z not in ds.z_curves or len(te) < 2 or (zs is not None and z not in zs):
+            continue
+        y = np.abs(np.asarray(ye, float))
+        for side in ("lo", "hi"):
+            sel = slice(0, 3) if side == "lo" else slice(-3, None)
+            t0, y0 = (te[0], y[0]) if side == "lo" else (te[-1], y[-1])
+            out = t_us < t0 if side == "lo" else t_us > t0
+            if not out.any() or y0 <= 0:
+                continue
+            if mode == "edge":
+                miss[out] += y0
+                continue
+            tt, yy = np.asarray(te[sel], float), y[sel]
+            ok = (yy > 0) & (tt > 0)
+            s = np.polyfit(np.log(tt[ok]), np.log(yy[ok]), 1)[0] if ok.sum() >= 2 else 0.0
+            s = max(s, 1.0) if side == "lo" else min(s, -1.0)
+            miss[out] += y0 * (t_us[out] / t0) ** s
+    return miss
+
+
+def compute_zbar(ds: Dataset, jacobian: bool = False, z_list=None, min_frac: float = 0.0,
+                 clip: bool = True, mask: str = "none", mask_tol: float = 0.05,
+                 fill: str = "zero"):
+    """zbar(E) = sum z N_z / sum N_z.  min_frac: noise floor (I5, valid where N_tot >
+    min_frac max N_tot); clip: negative J set to 0 (legacy, I5); mask = 'measured':
+    invalid where the ions possibly dropped by the zero fill outside the measured ranges
+    exceed mask_tol of the total (I4); fill = 'extrapolate' / 'edge': every z continued
+    beyond its measured range (missing_ions) instead of the zero fill (I4)."""
     t = ds.tof_us
     zs = [z for z in ds.all_z if z_list is None or z in z_list]
     E_keV = energy_keV(ds, velocity_kms(ds, t))
     jac = (t * 1e-6) / (2.0 * E_keV) if jacobian else 1.0
-    Nz = {z: np.clip(ds.z_curves[z], 0.0, None) / (z * ds.e_C) * jac for z in zs}
+    Nz = {z: (np.clip(ds.z_curves[z], 0.0, None) if clip else ds.z_curves[z])
+          / (z * ds.e_C) * jac for z in zs}
+    if fill in ("edge", "extrapolate"):
+        Nz = {z: Nz[z] + missing_ions(ds, t, [z], fill) / (z * ds.e_C) * jac for z in zs}
+    elif fill != "zero":
+        raise ValueError(f"zbar_fill = {fill!r}: use 'zero', 'extrapolate' or 'edge'")
     Ntot = sum(Nz.values())
     Nw = sum(z * Nz[z] for z in zs)
     with np.errstate(divide="ignore", invalid="ignore"):
         zbar = np.where(Ntot > 0, Nw / Ntot, np.nan)
     E = E_keV * 1e3
     valid = Ntot > min_frac * np.nanmax(Ntot)
+    if mask == "measured":
+        miss = sum(missing_ions(ds, t, [z]) / (z * ds.e_C) * jac for z in zs)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            valid &= miss <= mask_tol * (Ntot + miss)
+    elif mask != "none":
+        raise ValueError(f"zbar_mask = {mask!r}: use 'none' or 'measured'")
     o = np.argsort(E)
     return {"E_eV": E[o], "zbar": zbar[o], "Ntot": Ntot[o], "valid": valid[o], "zs": zs,
             "Nz": {z: Nz[z][o] for z in zs}}
+
+
+def zbar_options(analysis: dict | None) -> dict:
+    """compute_zbar keyword arguments from db [analysis] (defaults = legacy)."""
+    a = analysis or {}
+    return {"min_frac": float(a.get("zbar_min_frac", 0.0)),
+            "clip": bool(a.get("zbar_clip_negative", True)),
+            "mask": a.get("zbar_mask", "none"),
+            "mask_tol": float(a.get("zbar_mask_tol", 0.05)),
+            "fill": a.get("zbar_fill", "zero")}
 
 
 def fit_power_law(E_eV, zbar, valid, e_range=None):
@@ -180,9 +236,10 @@ def zbar_fit_range(ds: Dataset, zb: dict, settings) -> tuple:
     return lo, hi, E_start
 
 
-def analyze_zbar(ds: Dataset, settings) -> dict:
-    zb = compute_zbar(ds)
-    zj = compute_zbar(ds, jacobian=True)
+def analyze_zbar(ds: Dataset, settings, analysis: dict | None = None) -> dict:
+    opt = zbar_options(analysis)
+    zb = compute_zbar(ds, **opt)
+    zj = compute_zbar(ds, jacobian=True, **opt)
     both = zb["valid"] & zj["valid"] & np.isfinite(zb["zbar"]) & np.isfinite(zj["zbar"])
     jac_rel = float(np.max(np.abs(zj["zbar"][both] / zb["zbar"][both] - 1))) if both.any() \
         else np.nan

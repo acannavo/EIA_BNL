@@ -348,7 +348,7 @@ def _report_execute(db, run, ctx):
     st = study_of(db, run)
     ds = load_dataset(db, run, ck, st)
     summ = summarize(ds)
-    a = analyze_zbar(ds, st.zbar) if st is not None else {
+    a = analyze_zbar(ds, st.zbar, db.pipeline.get("analysis")) if st is not None else {
         "zb": None, "fit": None}
     items = []
     meta = (f"{run.target}, laser {run.laser.energy_mJ} mJ, L_EIA = {run.eia.L_m} m, "

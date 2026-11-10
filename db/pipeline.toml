@@ -54,8 +54,11 @@ per_ion           = true      # fit J_z / z
 recomb_dz         = [1, 2, 3]
 
 [analysis]                    # plot_eia_powerLaw_test
-zbar_min_frac     = 0.0
+zbar_min_frac     = 0.0       # I5 noise floor: zbar valid where N_tot > zbar_min_frac x max N_tot (legacy 0)
 zbar_clip_negative = true     # np.clip(J, 0) (I5)
+zbar_mask         = "none"    # I4: "none" (legacy: zero fill outside each z's measured range) | "measured"
+zbar_fill         = "zero"    # I4: "zero" (legacy) | "extrapolate" (power law through the 3 outer points of each z) | "edge" (flat at the edge value: extreme bound)
+zbar_mask_tol     = 0.05      # I4: invalid where the ions possibly dropped outside the measured ranges exceed this fraction
 divide_by_z       = false     # Jacobian grids: charge (false) or ions (true) per energy (I7)
 
 # ==========================================================================

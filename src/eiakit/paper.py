@@ -45,7 +45,7 @@ def paper_numbers(db, study_name, data_root, processed, source="pipeline") -> pd
         ck, _ = _load_ck(db, run, source, data_root, processed)
         cks[key] = ck
         ds = load_dataset(db, run, ck, st)
-        a = analyze_zbar(ds, st.zbar)
+        a = analyze_zbar(ds, st.zbar, db.pipeline.get("analysis"))
         f = a["fit"] or {}
         for k in ("C", "b", "n", "r2", "E_lo", "E_hi"):
             if k in f:

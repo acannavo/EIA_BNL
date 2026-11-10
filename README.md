@@ -86,6 +86,8 @@ with `db\pipeline.toml` as it is. Any setting can also be overridden for one com
 | `[calibration] output_duplicates` | `all` / `last_per_mz` / `last_save` | N1: rows of repeated saves in `Output\p<U>.txt`: all (legacy), the newest fit of each charge state, or only the last save |
 | `[calibration] overlaps` | `keep_both` / `nearest_line` | N8: a peak fitted as two (m, z) (e.g. O⁺ on Nb⁶⁺, C³⁺/O⁴⁺) counted twice in the summed yield, or each row assigned to its nearest predicted line |
 | `[calibration] fc_grid_points`, `fc_peak` | `1000` / `native`; `max` / `smoothed` | N7: FC average on 1000 points (40 ns: peak −1.4 % on 20250611) or the scope sampling; peak = max, or max after a moving average of `fc_smooth_s` |
+| `[calibration] method` | `peak` / `area` | I2: CFY from the peaks (legacy) or the areas over the common time range (`eiakit methods`) |
+| `[analysis] zbar_fill`, `zbar_mask`, `zbar_min_frac`, `zbar_clip_negative` | see `db\pipeline.toml` | I4 / I5: zero fill outside the measured ranges, noise floor (`eiakit methods`) |
 | `[calibration] fc_missing` | `error` / `legacy_cfy` / `legacy_fc_peak` | run without FC traces: stop, use the legacy CFY, or the legacy FC peak (CFY then follows EIA-side corrections exactly) |
 
 ## Database (`db/`)
@@ -179,6 +181,12 @@ eiakit diff NAME A B [--changelog TITLE] [--text TEXT]
                                      --changelog appends the entry to studies\<NAME>\changelog.md
 eiakit compare NAME KEY A B [--changelog TITLE] [--text TEXT]
                                      effect of one setting of db\pipeline.toml (see below)
+eiakit methods NAME [--only P ...] [--boot N]
+                                     method studies (Step 12) -> studies\<NAME>\methods\
+                                     (methods.html): zbar (I4 zero fill, I5 noise floor),
+                                     calibration (I2 peak vs area, EIA/FC overlay),
+                                     sensitivity (flight length, time zero), fc (start/stop,
+                                     shot-to-shot FC), shots (N12 bootstrap over shots)
 eiakit --set SECTION.KEY=VALUE <command>
                                      override a setting for one command only
 eiakit import-exclusions FILE [--study PRL_AlNb]

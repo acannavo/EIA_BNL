@@ -18,7 +18,8 @@ from .pipeline import STAGES, git_commit, read_manifest, sha256_file, sha256_jso
 
 
 def _settings_hash(db, st) -> str:
-    return sha256_json({"study": st.model_dump(mode="json"), "corrections": db.corrections()})
+    return sha256_json({"study": st.model_dump(mode="json"), "corrections": db.corrections(),
+                        "analysis": db.pipeline.get("analysis", {})})
 
 
 def _load_ck(db, run, source, data_root, processed):
@@ -52,7 +53,7 @@ def powerlaw(db, study_name, data_root, processed, studies_root, source="pipelin
         ck, rid = _load_ck(db, run, source, data_root, processed)
         upstream[key] = rid
         ds = load_dataset(db, run, ck, st)
-        a = analyze_zbar(ds, st.zbar)
+        a = analyze_zbar(ds, st.zbar, db.pipeline.get("analysis"))
         S = compute_sheil(ds)
         recs.append({"ds": ds, "zb": a["zb"], "fit": a["fit"], "S": S})
         f = a["fit"] or {}

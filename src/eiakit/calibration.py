@@ -99,8 +99,9 @@ def calibrate(rows: pd.DataFrame, fc_traces, fc_baseline_V: float, eia, fc, pipe
     summed = sum(interp.values())
     max_val_sum = summed.max()
 
-    if pipeline.get("method", "peak") != "peak":
-        raise NotImplementedError("only the legacy 'peak' calibration is implemented (I2)")
+    method = pipeline.get("method", "peak")
+    if method not in ("peak", "area"):
+        raise ValueError(f"[calibration] method = {method!r}: use 'peak' or 'area'")
 
     L1 = (1.0 / L_FC) ** (-3)          # same expressions as untitled27 (bit-for-bit)
     L2 = (1.0 / L_EIA) ** (-3)
@@ -129,7 +130,19 @@ def calibrate(rows: pd.DataFrame, fc_traces, fc_baseline_V: float, eia, fc, pipe
         fc_v = fc_v - fc_baseline_V
         max_val_avg, fc_peak_t = _peak(fc_t, fc_v)
         CFY_1m = max_val_avg * L1 / max_val_sum
-        CFY_EIA = max_val_avg * L2 / max_val_sum
+        if method == "area":
+            # I2: match the charge per unit area over the time range both cover: at 1 m,
+            # j(tau) = FC(L_FC tau) L_FC^3 = CFY sum_EIA(L_EIA tau), integrated over tau
+            tau0 = max(tof_common.min() / L_EIA, fc_t.min() / L_FC)
+            tau1 = min(tof_common.max() / L_EIA, fc_t.max() / L_FC)
+            sf = (fc_t >= tau0 * L_FC) & (fc_t <= tau1 * L_FC)
+            se = (tof_common >= tau0 * L_EIA) & (tof_common <= tau1 * L_EIA)
+            fc_int = _trapz(fc_v[sf], fc_t[sf])
+            eia_int = _trapz(summed[se], tof_common[se])
+            CFY_1m = L_FC ** 2 * L_EIA * fc_int / eia_int
+            CFY_EIA = CFY_1m * L2 / L1
+        else:
+            CFY_EIA = max_val_avg * L2 / max_val_sum          # untitled27 expression
     else:
         fc_t = fc_v = None
         CFY_1m = cfy_1m_override
@@ -238,28 +251,20 @@ def fc_dirs(run, source: str) -> list:
             "both": [fmt.folder, fmt.folder_stop]}[source]
 
 
-def run_calibration(db, run, data_root, fc_source="start", baseline="legacy",
-                    legacy_cfy=False) -> dict:
-    """
-    Calibration stage (untitled27): the FC pedestal is 'legacy' (recovered from the
-    legacy checkpoint, N7), 'pretrigger' (mean before t = 0) or a number in volts.
-    Returns {res, info, legacy} or {error}.
-    """
-    import numpy as np
+def prepare_rows(db, run, data_root) -> dict:
+    """The untitled28 peak rows the calibration uses: Output/p<U>.txt after the N1
+    (output_duplicates) and N8 (overlaps) settings. {rows, n_rows_file, N1, N8} or {error}."""
+    from .legacy import keep_last_save, read_output_folder, resolve_overlaps
 
-    from .acquisition import read_trace, scan_folder
-    from .legacy import keep_last_save, load_checkpoint, read_output_folder, resolve_overlaps
-
-    folder = run.folder(data_root)
     pipe = db.pipeline["calibration"]
-    out_dir = folder / run.acquisition.sem.folder / "Output"
-    rows = read_output_folder(out_dir)
+    sem = run.folder(data_root) / run.acquisition.sem.folder
+    rows = read_output_folder(sem / "Output")
     if rows.empty:
-        return {"error": f"no peak table in {out_dir}"}
+        return {"error": f"no peak table in {sem / 'Output'}"}
     n_rows_file, n1 = len(rows), []
     dup_mode = pipe.get("output_duplicates", "all")
     if dup_mode in ("last_per_mz", "last_save"):                   # N1
-        det = folder / run.acquisition.sem.folder / "Output_detail"
+        det = sem / "Output_detail"
         rows, n1 = keep_last_save(rows, read_output_folder(det) if det.is_dir() else None,
                                   dup_mode)
     elif dup_mode != "all":
@@ -272,6 +277,27 @@ def run_calibration(db, run, data_root, fc_source="start", baseline="legacy",
                                     float(pipe.get("overlap_res_floor", 0.002)))
     elif ov != "keep_both":
         return {"error": f"[calibration] overlaps = {ov!r}: use 'keep_both' or 'nearest_line'"}
+    return {"rows": rows, "n_rows_file": n_rows_file, "N1": n1, "N8": n8}
+
+
+def run_calibration(db, run, data_root, fc_source="start", baseline="legacy",
+                    legacy_cfy=False) -> dict:
+    """
+    Calibration stage (untitled27): the FC pedestal is 'legacy' (recovered from the
+    legacy checkpoint, N7), 'pretrigger' (mean before t = 0) or a number in volts.
+    Returns {res, info, legacy} or {error}.
+    """
+    import numpy as np
+
+    from .acquisition import read_trace, scan_folder
+    from .legacy import load_checkpoint
+
+    folder = run.folder(data_root)
+    pipe = db.pipeline["calibration"]
+    prep = prepare_rows(db, run, data_root)
+    if "error" in prep:
+        return prep
+    rows, n_rows_file, n1, n8 = prep["rows"], prep["n_rows_file"], prep["N1"], prep["N8"]
     fmt = run.acquisition.fc
     traces, used = [], []
     for d in fc_dirs(run, fc_source):

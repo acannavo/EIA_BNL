@@ -76,3 +76,29 @@ def test_eia_peaks_finds_slow_fast_ultra():
     assert p.loc["ultra_fast", "t_peak"] == pytest.approx(20, abs=0.1)
     hw = 3 * np.sqrt(np.log(2))                     # half width of exp(-(x/3)^2)
     assert p.loc["fast", "t_after"] - p.loc["fast", "t_before"] == pytest.approx(2 * hw, rel=1e-2)
+
+
+def test_zbar_fill_floor_and_mask_options():
+    """I4 / I5: z = 1 measured only for t >= 150 us, zero-filled before (legacy)."""
+    from eiakit.analysis import missing_ions
+    g = lambda t: np.exp(-((t - 100) / 40) ** 2) * 1e-6  # noqa: E731
+    ds = _ds({1: lambda t: np.where(t >= 150, g(t), 0.0), 2: lambda t: 2 * g(t)})
+    te = np.linspace(150, 400, 50)
+    ds.z_exp = {1: (te, g(te)), 2: (np.linspace(2, 400, 50), 2 * g(np.linspace(2, 400, 50)))}
+    # zero fill: only z = 2 before 150 us -> zbar = 2 there
+    zb = compute_zbar(ds)
+    E_early = zb["E_eV"] > energy_eV(ds, 140.0)
+    assert np.allclose(zb["zbar"][E_early & zb["valid"]], 2.0)
+    # extrapolated / edge fill: z = 1 continued before 150 us -> zbar < 2
+    for fill in ("extrapolate", "edge"):
+        zf = compute_zbar(ds, fill=fill)
+        assert np.nanmax(zf["zbar"][E_early & zf["valid"]]) < 2.0
+    # mask: points where the possibly missing z = 1 exceeds 5 % are invalid
+    zm = compute_zbar(ds, mask="measured")
+    assert zm["valid"].sum() < zb["valid"].sum()
+    # noise floor
+    zn = compute_zbar(ds, min_frac=0.1)
+    assert zn["valid"].sum() < zb["valid"].sum()
+    m = missing_ions(ds, ds.tof_us, [1], "extrapolate")
+    assert m[ds.tof_us < 150].max() <= g(150.0) + 1e-18 and m[ds.tof_us > 160].max() == 0
+
