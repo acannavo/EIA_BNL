@@ -364,7 +364,7 @@ def cmd_cbs(args) -> int:
               f"{s['fwhm_over_bound']:.2f} x bound; t_peak_fit <= "
               f"{s['t_peak_fit_max_steps']:.0f} grid steps")
         print(f"   origin of kT {s['kT_origin']}, of A {s['A_origin']}  -> {out}")
-        if not res["status"].startswith("reproduced"):
+        if not res["status"].startswith(("reproduced", "model reproduced")):
             worst = max(worst, 1)
     return worst
 

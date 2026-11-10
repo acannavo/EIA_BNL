@@ -81,6 +81,7 @@ eiakit diff PRL_AlNb legacy I1 --changelog "I1: CODATA mass unit and elementary 
 | switch | values | effect |
 |---|---|---|
 | `[corrections] mass_constants` | `legacy` / `codata` | I1: CODATA amu, ion masses and e in CBS and analysis; CBS kT, V0 rescaled, curves unchanged |
+| `[calibration] output_duplicates` | `all` / `last_per_mz` / `last_save` | N1: rows of repeated saves in `Output\p<U>.txt`: all (legacy), the newest fit of each charge state, or only the last save |
 | `[calibration] fc_missing` | `error` / `legacy_cfy` | run without FC traces: stop, or use the legacy CFY of the checkpoint |
 
 ## Database (`db/`)

@@ -207,7 +207,7 @@ def run_calibration(db, run, data_root, fc_source="start", baseline="legacy",
     import numpy as np
 
     from .acquisition import read_trace, scan_folder
-    from .legacy import load_checkpoint, read_output_folder
+    from .legacy import keep_last_save, load_checkpoint, read_output_folder
 
     folder = run.folder(data_root)
     pipe = db.pipeline["calibration"]
@@ -215,6 +215,15 @@ def run_calibration(db, run, data_root, fc_source="start", baseline="legacy",
     rows = read_output_folder(out_dir)
     if rows.empty:
         return {"error": f"no peak table in {out_dir}"}
+    n_rows_file, n1 = len(rows), []
+    dup_mode = pipe.get("output_duplicates", "all")
+    if dup_mode in ("last_per_mz", "last_save"):                   # N1
+        det = folder / run.acquisition.sem.folder / "Output_detail"
+        rows, n1 = keep_last_save(rows, read_output_folder(det) if det.is_dir() else None,
+                                  dup_mode)
+    elif dup_mode != "all":
+        return {"error": f"[calibration] output_duplicates = {dup_mode!r}: "
+                         "use 'all', 'last_per_mz' or 'last_save'"}
     fmt = run.acquisition.fc
     traces, used = [], []
     for d in fc_dirs(run, fc_source):
@@ -254,9 +263,10 @@ def run_calibration(db, run, data_root, fc_source="start", baseline="legacy",
     info = {"run": run.key, "fc_source": fc_source, "fc_files": used, "fc_baseline_V": B,
             "baseline_method": how, "fc_peak_V": res["fc_peak_V"], "CFY_1m": res["CFY_1m"],
             "CFY_EIA": res["CFY_EIA"], "n_output_rows": len(rows),
+            "n_output_rows_in_files": n_rows_file, "N1_last_save": n1,
             "pairs": len(res["corrected_spectra"]),
-            "settings": {k: pipe[k] for k in ("n_interp", "fc_grid_points", "method",
-                                              "interp_fill")}}
+            "settings": {k: pipe.get(k) for k in ("n_interp", "fc_grid_points", "method",
+                                                  "interp_fill", "output_duplicates")}}
     if old is not None:
         diff = compare_checkpoints(res, old)
         num = [v for v in diff.values() if isinstance(v, float)]

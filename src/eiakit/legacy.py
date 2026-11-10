@@ -65,6 +65,40 @@ def read_output_detail_folder(folder: Path) -> pd.DataFrame:
     return read_output_folder(folder)
 
 
+def keep_last_save(rows: pd.DataFrame, detail: pd.DataFrame | None,
+                   mode: str = "last_per_mz") -> tuple[pd.DataFrame, list]:
+    """
+    N1: untitled28 appends to Output/p<U>.txt on every 'Save Fitted Points' and overwrites
+    Output_detail/p<U>.txt. Per file with a repeated (m, z):
+      mode 'last_per_mz'  the newest row of each (m, z): a charge state refitted later
+                          replaces its old fit, charge states not refitted are kept
+                          (20250611 p600: the last save holds only a z = 1 refit)
+      mode 'last_save'    only the last save = the last len(Output_detail) rows when they
+                          equal Output_detail (TOF, YieldAveFit), else 'last_per_mz'
+    Returns (rows, notes) with one note per file changed.
+    """
+    dup_files = rows[rows.duplicated(["file", "m", "z"], keep=False)].file.unique()
+    if not len(dup_files):
+        return rows, []
+    keep, notes = [], []
+    for f, whole in rows.groupby("file", sort=False):
+        if f not in dup_files:
+            keep.append(whole)
+            continue
+        dd = detail[detail.file == f] if detail is not None and len(detail) else None
+        tail = whole.tail(len(dd)) if dd is not None and 0 < len(dd) < len(whole) else None
+        if (mode == "last_save" and tail is not None
+                and np.allclose(tail.TOF.values, dd.TOF.values, rtol=1e-12)
+                and np.allclose(tail.Yield.values, dd.YieldAveFit.values, rtol=1e-12)):
+            new, how = tail, "last save = Output_detail"
+        else:
+            new, how = whole.drop_duplicates(["m", "z"], keep="last"), "last row per (m, z)"
+        keep.append(new)
+        notes.append({"file": f, "rows_before": len(whole), "rows_after": len(new),
+                      "method": how})
+    return pd.concat(keep, ignore_index=True), notes
+
+
 # ================================================================ untitled27 checkpoint
 
 def load_checkpoint(path: Path) -> dict:

@@ -36,3 +36,20 @@ def test_diff_and_changelog(tmp_path):
     assert "## I1: test" in txt and "`mass_constants`: 'legacy' → 'codata'" in txt
     assert "| cbs_params | kT_eV | 1 / 1 |" in txt and "| 100 | 99 |" in txt
     assert "only in `b`: 1" in txt
+
+
+def test_keep_last_save_modes():
+    """N1: p600 of 20250611 - first save z = 1..3, last save only a z = 1 refit."""
+    from eiakit.legacy import keep_last_save
+    rows = pd.DataFrame({"file": ["p600.txt"] * 4 + ["p10.txt"],
+                         "m": [92] * 5, "z": [1, 2, 3, 1, 1],
+                         "TOF": [2.48e-5, 1.76e-5, 1.44e-5, 2.45e-5, 1e-4],
+                         "Yield": [-1.0, -2.0, -3.0, -1.5, -9.0]})
+    detail = pd.DataFrame({"file": ["p600.txt"], "TOF": [2.45e-5], "YieldAveFit": [-1.5]})
+    per, notes = keep_last_save(rows, detail, "last_per_mz")
+    p6 = per[per.file == "p600.txt"].sort_values("z")
+    assert list(p6.z) == [1, 2, 3] and list(p6.Yield) == [-1.5, -2.0, -3.0]
+    assert len(per[per.file == "p10.txt"]) == 1 and len(notes) == 1
+    last, notes = keep_last_save(rows, detail, "last_save")
+    assert list(last[last.file == "p600.txt"].z) == [1]
+    assert notes[0]["method"] == "last save = Output_detail"

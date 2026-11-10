@@ -235,6 +235,9 @@ def _cal_inputs(db, run, data_root, ins):
     sem = _sem_dir(run, data_root)
     if (sem / "Output").is_dir():
         ins.add_many(sorted((sem / "Output").glob("*.txt")))
+    if (pipe.get("output_duplicates", "all") in ("last_per_mz", "last_save")
+            and (sem / "Output_detail").is_dir()):
+        ins.add_many(sorted((sem / "Output_detail").glob("*.txt")))
     fmt = run.acquisition.fc
     for d in fc_dirs(run, pipe.get("fc_source", "start")):
         if d and (run.folder(data_root) / d).is_dir():
@@ -297,7 +300,7 @@ def _cbs_execute(db, run, ctx):
     (ctx.out / "replay_summary.json").write_text(json.dumps(
         {"status": r["status"], "files": r["files"], **s}, indent=2, default=str),
         encoding="utf-8")
-    return r["status"].startswith("reproduced"), {
+    return r["status"].startswith(("reproduced", "model reproduced")), {
         "status": r["status"], "components": s["n_components"],
         "data_area_scale_vs_legacy_fit": s.get("data_area_scale")}
 

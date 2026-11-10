@@ -538,10 +538,18 @@ def replay_run_cbs(db, run, data_root, ck: dict | None = None) -> dict:
                   "model_win_area_over_bound": float((both.d_Area_model
                                                       / both.bound_area_win).max())})
         s["stale_checkpoint"] = bool(abs(scale - 1) > 1e-6 and spread < 1e-6)
-        ok &= (len(both) == len(a) and spread < 1e-6
-               and s["model_area_over_bound"] <= 2 and s["model_win_area_over_bound"] <= 2)
+        ok &= (len(both) == len(a) and s["model_area_over_bound"] <= 2
+               and s["model_win_area_over_bound"] <= 2)
+        data_ok = spread < 1e-6
+        if not data_ok:      # spectra changed non-uniformly since the fit (e.g. a correction)
+            rel = (ratio / scale - 1).abs()
+            s["data_area_changed"] = int((rel > 1e-6).sum())
+            s["data_area_max_change"] = spread
     status = "reproduced" if ok else "differs"
-    if ok and s.get("stale_checkpoint"):
+    if ok and s.get("data_area_changed"):
+        status = (f"model reproduced; data areas changed since the fit "
+                  f"({s['data_area_changed']} components, max {s['data_area_max_change']:.2%})")
+    elif ok and s.get("stale_checkpoint"):
         status = f"reproduced (checkpoint data x {s['data_area_scale']:.6f} since the fit)"
     out.update(status=status, summary=s,
                files={"fit": str(fit_p), "areas": str(area_p) if area_p else None,

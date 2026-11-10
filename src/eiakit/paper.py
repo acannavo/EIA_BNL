@@ -7,7 +7,8 @@ can quote:
     zbar            C, b, n, R2, E_lo, E_hi per dataset; Sheil yield (ions / sr / shot)
     cbs_velocity    mean / std of the averaged components (u_peak, u_pick, u_fit)
     cbs_params      kT, V0 (and their scale) per (run, z, component)
-    cbs_ions        ions cm^-2 per (run, z, component), model on the whole grid
+    cbs_ions        ions cm^-2 per (run, z, component): model on the whole grid (figures),
+                    data in the component window (shows a stale fit after a data change)
     collapse        z*, se, s_phys, u1 per dataset and joint, for both peak sources
     energy          slow-branch energy fits (n, A, intercepts) per dataset and source
 Snapshots live in studies/<name>/snapshots/<label>.csv (+ .json: corrections, git, time).
@@ -67,7 +68,8 @@ def paper_numbers(db, study_name, data_root, processed, source="pipeline") -> pd
                 lbl = f"{key} z{z} {names.get(c.extra.get('cbs'), c.extra.get('cbs'))}"
                 out += [_rows("cbs_params", "kT_eV", lbl, c.kT),
                         _rows("cbs_params", "V0_V", lbl, c.V0),
-                        _rows("cbs_ions", "ions_model_full_cm2", lbl, r.Ions_model_full_cm2)]
+                        _rows("cbs_ions", "ions_model_full_cm2", lbl, r.Ions_model_full_cm2),
+                        _rows("cbs_ions", "ions_data_win_cm2", lbl, r.Ions_data_win_cm2)]
     tab = study_components(db, study_name, data_root, processed,
                            "pipeline" if source == "pipeline" else "legacy")
     for col in ("u_peak", "u_pick", "u_fit"):
@@ -118,8 +120,7 @@ def write_snapshot(db, study_name, label, data_root, processed, studies_root,
     meta = {"label": label, "study": study_name, "source": source, "note": note,
             "created": time.strftime("%Y-%m-%d %H:%M:%S"), "eiakit": __version__,
             "git": git_commit(), "corrections": db.corrections(),
-            "calibration": {k: db.pipeline["calibration"].get(k)
-                            for k in ("fc_source", "fc_baseline", "fc_missing")},
+            "calibration": dict(db.pipeline["calibration"]),
             "n_numbers": int(len(tab))}
     p.with_suffix(".json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return p
