@@ -197,3 +197,58 @@ def test_collapse_matches_legacy_script():
         j = C.weighted_joint([s["zstar"] for s in ser], [s["se_zstar"] for s in ser])
         got["joint"] = (round(j["zstar"], 2), round(j["se"], 2))
         assert got == exp, src
+
+
+def test_cbs_store_roundtrip_reproduces_the_legacy_fit(tmp_path):
+    """Step 9: importing a legacy fit into the store changes no number of the CBS model."""
+    from eiakit.cbs import CBSModel, components_from_fit_file  # noqa: F401
+    from eiakit.cbs_store import import_legacy, legacy_fit_path, read_store
+    from eiakit.legacy import parse_cbs_fit_results
+    for key in [k for k in RUNS if (ROOT / k / "EIA-Results").is_dir()][:3]:
+        run = db.run(key)
+        p = import_legacy(db, run, ROOT, tmp_path)
+        st = read_store(tmp_path, run)
+        leg = parse_cbs_fit_results(legacy_fit_path(run, ROOT))
+        a, b = components_from_fit_file(leg), components_from_fit_file(st)
+        assert sorted(a) == sorted(b)
+        for z in a:
+            for ca, cb in zip(a[z], b[z], strict=True):
+                assert (ca.kT, ca.V0, ca.A, ca.t_peak, ca.fwhm, ca.win_left, ca.win_right) == \
+                       (cb.kT, cb.V0, cb.A, cb.t_peak, cb.fwhm, cb.win_left, cb.win_right)
+                assert ca.extra["cbs"] == cb.extra["cbs"]
+        assert p.is_file() and st.header.M_ION_kg == (leg.header.M_ION_kg or st.header.M_ION_kg)
+
+
+def test_cbs_session_edit_save_reload(tmp_path):
+    """Step 9: a fitter session saved unchanged reproduces the legacy model; edits persist."""
+    import numpy as np
+
+    from eiakit.cbs_edit import CBSSession
+    key = next(k for k in RUNS if (ROOT / k / "EIA-Results").is_dir())
+    run = db.run(key)
+    s = CBSSession.load(db, run, ROOT)
+    z = next(z for z in s.zs if s.comps.get(z) and s.comps[z][0].active)
+    ref = s.total(z).copy()
+    a0 = s.areas(z)
+    p = s.save(tmp_path)
+    assert p.is_file()
+    import os
+    os.environ["EIA_FITS_ROOT"], old = str(tmp_path), os.environ["EIA_FITS_ROOT"]
+    try:
+        os.environ.setdefault("EIA_PROCESSED_ROOT", str(tmp_path / "p"))
+        os.environ.setdefault("EIA_STUDIES_ROOT", str(tmp_path / "s"))
+        s2 = CBSSession.load(db, run, ROOT)
+        assert s2.source.startswith("store")
+        assert np.allclose(s2.total(z), ref, rtol=1e-10, atol=0)
+        assert np.allclose(s2.areas(z).Ions_model_full_cm2, a0.Ions_model_full_cm2, rtol=1e-10)
+        # edit: refit the first component, add a slow one, save, reload
+        s2.fit(z, 0)
+        i = s2.add(z, "slow", float(s2.comps[z][0].t_peak) * 1.5)
+        assert s2.comps[z][i].extra["label"] == "slow"
+        s2.save(tmp_path, note="test")
+        s3 = CBSSession.load(db, run, ROOT)
+        labs = [c.extra["label"] for c in s3.comps[z]]
+        assert "slow" in labs and len(labs) == len(s2.comps[z])
+        assert len(list(tmp_path.glob(f"{key}/cbs_fit.*.json"))) >= 1     # backup kept
+    finally:
+        os.environ["EIA_FITS_ROOT"] = old

@@ -30,6 +30,13 @@ class Paths:
     processed: Path
     studies: Path
 
+    @property
+    def fits(self) -> Path:
+        """Hand-made fits (CBS fitter, Step 9): EIA_FITS_ROOT, default <processed>/../fits.
+        Kept outside processed/ so that clearing the pipeline outputs never deletes them."""
+        v = os.environ.get("EIA_FITS_ROOT")
+        return Path(v).expanduser() if v else self.processed.parent / "fits"
+
     def check(self) -> dict[str, bool]:
         """Existence of each root (data must exist; the others are created on demand)."""
         return {"data": self.data.is_dir(),

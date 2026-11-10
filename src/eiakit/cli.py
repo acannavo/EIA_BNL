@@ -41,6 +41,10 @@ Command line entry point:  ``eiakit <command>``
                                     method studies (Step 12) -> studies/<NAME>/methods/:
                                     zbar (I4/I5), calibration (I2), sensitivity (LOF, t0),
                                     fc (start/stop drift), shots (N12 bootstrap)
+    eiakit fit-import [KEY ...] [--force]
+                                    start the CBS fit store (fits/<KEY>/cbs_fit.json) from the
+                                    legacy CBS_fit_results file; the fitter edits the store
+    eiakit gui                      the eiakit window: runs and stages, studies, CBS fitter
     eiakit note NAME TITLE [--text TEXT]
                                     changelog section for a check that changed no number
     eiakit --set SECTION.KEY=VALUE <command>
@@ -584,6 +588,29 @@ def cmd_methods(args) -> int:
     return 0
 
 
+def cmd_fit_import(args) -> int:
+    """Start the CBS fit store of runs from their legacy CBS_fit_results files."""
+    from .cbs_store import import_legacy, store_path
+    db = _load_db()
+    paths = get_paths()
+    rc = 0
+    for run in _select_runs(db, args.keys):
+        if store_path(paths.fits, run).is_file() and not args.force:
+            print(f"{run.key}: store exists ({store_path(paths.fits, run)}); --force to replace")
+            continue
+        try:
+            print(f"{run.key}: -> {import_legacy(db, run, paths.data, paths.fits)}")
+        except FileNotFoundError as e:
+            print(f"{run.key}: {e}")
+            rc = 1
+    return rc
+
+
+def cmd_gui(args) -> int:
+    from .gui.app import main as gui_main
+    return gui_main()
+
+
 def _append_changelog(paths, name: str, entry: str):
     log = paths.studies / name / "changelog.md"
     log.parent.mkdir(parents=True, exist_ok=True)
@@ -722,6 +749,12 @@ def main(argv=None) -> int:
     p.add_argument("--force", action="store_true",
                    help="write the changelog entry even if nothing changed")
     p.set_defaults(func=cmd_diff)
+    p = sub.add_parser("fit-import", help="start the CBS fit store from the legacy fit files")
+    p.add_argument("keys", nargs="*")
+    p.add_argument("--force", action="store_true", help="replace an existing store")
+    p.set_defaults(func=cmd_fit_import)
+    sub.add_parser("gui", help="the eiakit window (runs, stages, studies, CBS fitter)") \
+        .set_defaults(func=cmd_gui)
     p = sub.add_parser("methods", help="method studies (Step 12): zbar, calibration, ...")
     p.add_argument("name")
     p.add_argument("--only", nargs="+",

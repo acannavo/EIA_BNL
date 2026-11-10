@@ -244,8 +244,14 @@ def _cal_inputs(db, run, data_root, ins):
     for d in fc_dirs(run, pipe.get("fc_source", "start")):
         if d and (run.folder(data_root) / d).is_dir():
             ins.add_many(p for p, _, _ in scan_folder(run.folder(data_root) / d, fmt).matched)
-    if pipe.get("fc_baseline", "legacy") == "legacy":
+    if pipe.get("fc_baseline", "legacy") in ("legacy", "picked"):
         ins.add(_results_dir(run, data_root) / "pipeline_checkpoint.npy")
+    from .cbs_store import default_fits_root
+    from .peaks_edit import baseline_path, override_files
+    root = default_fits_root()
+    if root is not None:                          # Step 9 tools: refitted voltages, baseline
+        ins.add_many(override_files(root, run).values())
+        ins.add(baseline_path(root, run))
 
 
 def _cal_execute(db, run, ctx):
@@ -281,15 +287,45 @@ def _cbs_params(db, run):
 
 def _cbs_inputs(db, run, data_root, ins):
     from .audit import _find_cbs_file
+    from .cbs_store import default_fits_root, store_path
     res = _results_dir(run, data_root)
     for prefix in ("CBS_fit_results", "CBS_areas"):
         ins.add(_find_cbs_file(res, prefix, run.fit_file_labels, run.target) or res / "-")
+    root = default_fits_root()
+    if root is not None:
+        ins.add(store_path(root, run))            # CBS fit store (Step 9), if there is one
+
+
+def _cbs_store_execute(db, run, ctx, ck):
+    """CBS stage with a fit store: areas of the stored components on the current spectra."""
+    import pandas as pd
+
+    from .cbs import run_model
+    rm = run_model(db, run, ctx.data_root, ck)
+    model, curves = rm["model"], rm["curves"]
+    tabs = []
+    for z, comps in rm["components"].items():         # already rescaled to the profile (I1)
+        if z in curves:
+            a = model.areas(comps, curves[z], z)
+            if a is not None:
+                tabs.append(a)
+    areas = pd.concat(tabs, ignore_index=True)
+    areas.to_csv(ctx.out / "cbs_areas.csv", index=False)
+    summ = {"status": f"fit store ({rm['fit_path'].name}, saved {rm['fit'].header.generated})",
+            "components": int(len(areas)), "store": str(rm["fit_path"])}
+    (ctx.out / "replay_summary.json").write_text(json.dumps(summ, indent=2, default=str),
+                                                  encoding="utf-8")
+    return True, summ
 
 
 def _cbs_execute(db, run, ctx):
     from .cbs import replay_run_cbs
+    from .cbs_store import default_fits_root, store_path
     from .store import load_calibration_h5
     ck = load_calibration_h5(ctx.upstream_out["calibration"] / "spectra.h5")
+    root = default_fits_root()
+    if root is not None and store_path(root, run).is_file():
+        return _cbs_store_execute(db, run, ctx, ck)
     r = replay_run_cbs(db, run, ctx.data_root, ck=ck)
     if r["status"] == "missing files":
         return False, {"error": f"missing files {r['files']}"}

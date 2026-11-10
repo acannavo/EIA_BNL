@@ -30,13 +30,13 @@ def _u(L, t_us):
 def run_components(db, run, data_root, areas: pd.DataFrame | None = None,
                    study=None) -> pd.DataFrame:
     from .audit import _find_cbs_file
-    from .legacy import parse_cbs_areas, parse_cbs_fit_results
+    from .cbs_store import default_fits_root, load_fit
+    from .legacy import parse_cbs_areas
 
     res = run.folder(data_root) / "EIA-Results"
-    fit_p = _find_cbs_file(res, "CBS_fit_results", run.fit_file_labels, run.target)
-    if fit_p is None:
+    fit = load_fit(db, run, data_root, default_fits_root())
+    if fit is None:
         raise FileNotFoundError(f"{run.key}: no CBS_fit_results file")
-    fit = parse_cbs_fit_results(fit_p)
     L = fit.header.L_EIA_m or run.eia.L_m
     if areas is None:
         ap = _find_cbs_file(res, "CBS_areas", run.fit_file_labels, run.target)

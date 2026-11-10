@@ -448,22 +448,27 @@ def replay_fit_file(model: CBSModel, curves: dict, fit, areas=None,
             "totals": pd.DataFrame(tot_rows)}
 
 
-def run_model(db, run, data_root, ck: dict | None = None) -> dict:
+def run_model(db, run, data_root, ck: dict | None = None, use_store: bool = True) -> dict:
     """
-    The CBS setting of a run: model (mass, e, L from the run's legacy CBS profile and the
-    fit-file header), per-z signals of the checkpoint (`ck` or the legacy one), and the
-    stored components. Returns {status, model, curves, exp, fit, areas, components, ...}.
+    The CBS setting of a run: model (mass, e, L from the constants profile and the
+    fit header), per-z signals of the checkpoint (`ck` or the legacy one), and the
+    components: the CBS fit store (Step 9) if there is one and use_store, else the legacy
+    CBS_fit_results file. Returns {status, model, curves, exp, fit, areas, components, ...}.
     """
     from .audit import _find_cbs_file
+    from .cbs_store import default_fits_root, read_store
     from .legacy import load_checkpoint, parse_cbs_areas, parse_cbs_fit_results
 
     res = run.folder(data_root) / "EIA-Results"
-    fit_p = _find_cbs_file(res, "CBS_fit_results", run.fit_file_labels, run.target)
-    area_p = _find_cbs_file(res, "CBS_areas", run.fit_file_labels, run.target)
+    store = read_store(default_fits_root(), run) if use_store and default_fits_root() else None
+    fit_p = store.path if store is not None else \
+        _find_cbs_file(res, "CBS_fit_results", run.fit_file_labels, run.target)
+    area_p = None if store is not None else \
+        _find_cbs_file(res, "CBS_areas", run.fit_file_labels, run.target)
     ck_p = res / "pipeline_checkpoint.npy"
     if fit_p is None or (ck is None and not ck_p.is_file()):
         return {"status": "missing files", "files": {"fit": fit_p, "checkpoint": ck_p}}
-    fit = parse_cbs_fit_results(fit_p)
+    fit = store if store is not None else parse_cbs_fit_results(fit_p)
     areas = parse_cbs_areas(area_p) if area_p else None
     if ck is None:
         ck = load_checkpoint(ck_p)
@@ -481,7 +486,8 @@ def run_model(db, run, data_root, ck: dict | None = None) -> dict:
     # charge rescales them and leaves times, FWHM and areas unchanged (I1)
     leg = run.legacy.profile_cbs
     m_old = fit.header.M_ION_kg or db.mass_kg(run.target, leg)
-    s = (m_kg / m_old) * (db.e_C(leg) / e_C)
+    e_old = getattr(fit.header, "e_C", None) or db.e_C(leg)
+    s = (m_kg / m_old) * (e_old / e_C)
     if abs(s - 1) > 1e-12:
         for cs in comps.values():
             for c in cs:
@@ -491,7 +497,8 @@ def run_model(db, run, data_root, ck: dict | None = None) -> dict:
                     c.V0 *= s
     return {"status": "ok", "model": model, "curves": curves, "exp": exp, "fit": fit,
             "areas": areas, "components": comps, "profile": prof, "param_scale": s,
-            "per_ion": per_ion, "fit_path": fit_p, "areas_path": area_p, "ck_path": ck_p}
+            "per_ion": per_ion, "fit_path": fit_p, "areas_path": area_p, "ck_path": ck_p,
+            "from_store": store is not None}
 
 
 def replay_run_cbs(db, run, data_root, ck: dict | None = None) -> dict:
@@ -505,7 +512,7 @@ def replay_run_cbs(db, run, data_root, ck: dict | None = None) -> dict:
       FWHM_fit      same; t_peak_fit within 3 grid steps (argmax on a flat top).
     Returns {status, summary, components, areas_cmp, totals, files}.
     """
-    rm = run_model(db, run, data_root, ck)
+    rm = run_model(db, run, data_root, ck, use_store=False)
     if rm["status"] == "missing files":
         return rm
     model, curves, fit, areas = rm["model"], rm["curves"], rm["fit"], rm["areas"]

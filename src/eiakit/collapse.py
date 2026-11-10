@@ -77,12 +77,9 @@ def eia_peaks(ds, prom_frac: float = 0.05, err_mode: str = "hwhm") -> pd.DataFra
 
 def cbs_peaks(db, run, data_root, t_source: str = "exp") -> pd.DataFrame:
     """Fitted components of the run's CBS file: PEAK sample ('exp') or picked t_peak."""
-    from .audit import _find_cbs_file
-    from .legacy import parse_cbs_fit_results
+    from .cbs_store import default_fits_root, load_fit
 
-    res = run.folder(data_root) / "EIA-Results"
-    p = _find_cbs_file(res, "CBS_fit_results", run.fit_file_labels, run.target)
-    fit = parse_cbs_fit_results(p)
+    fit = load_fit(db, run, data_root, default_fits_root())
     L = fit.header.L_EIA_m or run.eia.L_m
     names = run.legacy.cbs_components
     rows = []

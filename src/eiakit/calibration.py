@@ -112,12 +112,17 @@ def calibrate(rows: pd.DataFrame, fc_traces, fc_baseline_V: float, eia, fc, pipe
         return v if v == "native" else int(v)
 
     def _peak(t, v):
-        """FC peak: 'max' of the average (legacy) or max after a moving average of fc_smooth_s."""
+        """FC peak: 'max' of the average (legacy) or max after a moving average of
+        fc_smooth_s, searched at t >= fc_peak_t_min_s (the laser pickup at t ~ 0 can be
+        as high as the ion peak; legacy: whole trace)."""
         if pipeline.get("fc_peak", "max") == "smoothed":
             w = max(1, int(round(float(pipeline.get("fc_smooth_s", 5e-8))
                                  / float(np.median(np.diff(t))))))
             v = np.convolve(v, np.ones(w) / w, mode="same")
-        return float(v.max()), float(t[int(np.argmax(v))])
+        tmin = pipeline.get("fc_peak_t_min_s")
+        sel = t >= float(tmin) if tmin is not None else np.ones(t.shape, bool)
+        k = int(np.flatnonzero(sel)[np.argmax(v[sel])])
+        return float(v[k]), float(t[k])
 
     fc_peak_t = None
     if fc_peak_override is not None:
@@ -251,6 +256,12 @@ def fc_dirs(run, source: str) -> list:
             "both": [fmt.folder, fmt.folder_stop]}[source]
 
 
+def _picked(run):
+    from .cbs_store import default_fits_root
+    from .peaks_edit import picked_baseline
+    return picked_baseline(default_fits_root(), run)
+
+
 def prepare_rows(db, run, data_root) -> dict:
     """The untitled28 peak rows the calibration uses: Output/p<U>.txt after the N1
     (output_duplicates) and N8 (overlaps) settings. {rows, n_rows_file, N1, N8} or {error}."""
@@ -262,6 +273,17 @@ def prepare_rows(db, run, data_root) -> dict:
     if rows.empty:
         return {"error": f"no peak table in {sem / 'Output'}"}
     n_rows_file, n1 = len(rows), []
+    # Step 9: voltages refitted in the peak picker replace their Output rows
+    from .cbs_store import default_fits_root
+    from .peaks_edit import override_files
+    ovr = override_files(default_fits_root(), run)
+    for U, f in ovr.items():
+        new = pd.read_csv(f)
+        new.insert(0, "row", range(len(new)))
+        new.insert(0, "U", U)
+        new.insert(0, "file", f"fits:{f.name}")
+        rows = pd.concat([rows[rows.U != U], new.astype({"m": int, "z": int})],
+                         ignore_index=True)
     dup_mode = pipe.get("output_duplicates", "all")
     if dup_mode in ("last_per_mz", "last_save"):                   # N1
         det = sem / "Output_detail"
@@ -277,7 +299,8 @@ def prepare_rows(db, run, data_root) -> dict:
                                     float(pipe.get("overlap_res_floor", 0.002)))
     elif ov != "keep_both":
         return {"error": f"[calibration] overlaps = {ov!r}: use 'keep_both' or 'nearest_line'"}
-    return {"rows": rows, "n_rows_file": n_rows_file, "N1": n1, "N8": n8}
+    return {"rows": rows, "n_rows_file": n_rows_file, "N1": n1, "N8": n8,
+            "peak_overrides": sorted(ovr)}
 
 
 def run_calibration(db, run, data_root, fc_source="start", baseline="legacy",
@@ -322,7 +345,9 @@ def run_calibration(db, run, data_root, fc_source="start", baseline="legacy",
         if old is None:
             return {"error": "legacy CFY needs the legacy checkpoint"}
         cfy, B, how = old["CFY_1m"], 0.0, "CFY_1m taken from the legacy checkpoint"
-    elif baseline == "legacy":
+    elif baseline == "picked" and traces and _picked(run) is not None:
+        B, how = _picked(run), "picked in the baseline tool (fits/<run>/fc_baseline.json)"
+    elif baseline in ("legacy", "picked"):
         if old is None or not traces:
             if not traces:
                 return {"error": f"no FC traces in {fc_dirs(run, fc_source)}"}
@@ -348,12 +373,16 @@ def run_calibration(db, run, data_root, fc_source="start", baseline="legacy",
             "baseline_method": how, "fc_peak_V": res["fc_peak_V"], "CFY_1m": res["CFY_1m"],
             "CFY_EIA": res["CFY_EIA"], "n_output_rows": len(rows),
             "n_output_rows_in_files": n_rows_file, "N1_last_save": n1,
-            "N8_overlaps_dropped": n8,
+            "N8_overlaps_dropped": n8, "peak_overrides_U": prep["peak_overrides"],
             "pairs": len(res["corrected_spectra"]),
             "fc_peak_t_s": res.get("fc_peak_t_s"),
+            "fc_peak_warning": (None if res.get("fc_peak_t_s") is None
+                                or res["fc_peak_t_s"] > 1e-6 else
+                                "FC peak within 1 us of the trigger: laser pickup? set "
+                                "[calibration] fc_peak_t_min_s"),
             "fc_per_shot_peak_V": _per_shot_peaks(traces, B, pipe),
             "settings": {k: pipe.get(k) for k in ("n_interp", "fc_grid_points", "fc_peak",
-                                                  "fc_smooth_s", "method",
+                                                  "fc_smooth_s", "fc_peak_t_min_s", "method",
                                                   "interp_fill", "output_duplicates", "overlaps")}}
     if old is not None:
         diff = compare_checkpoints(res, old)

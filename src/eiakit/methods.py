@@ -182,7 +182,8 @@ def study_calibration(db, st, data_root) -> dict:
                              "EIA (summed) vs Faraday cup at 1 m (I2)"))
         for i, (key, run, tf, jf, te, je, ja) in enumerate(overlays):
             p = f.panel(i, 0)
-            p.title = f"{key}: {run.target}, {run.laser.energy_mJ:g} mJ"
+            mj = run.laser.energy_mJ
+            p.title = f"{key}: {run.target}, {'?' if mj is None else f'{mj:g}'} mJ"
             p.xlabel = lab(r"$t / L$  [$\mu$s/m]", "t / L [µs/m]")
             p.ylabel = lab(r"$V_{FC}(L\tau)\,L_{FC}^3$  [V m$^3$]", "V_FC(Lτ) L_FC³ [V m³]")
             p.add(Line(tf, jf, "Faraday cup", "black", width=1.0),
@@ -282,7 +283,9 @@ def study_fc(db, st, data_root) -> dict:
             pk = np.array(i["fc_per_shot_peak_V"])
             cfy[src] = i["CFY_1m"]
             rows.append({"run": key, "source": src, "shots": len(pk), "CFY_1m": i["CFY_1m"],
-                         "fc_peak_avg_V": i["fc_peak_V"], "shot_peak_mean_V": pk.mean(),
+                         "fc_peak_avg_V": i["fc_peak_V"],
+                         "fc_peak_t_us": (i.get("fc_peak_t_s") or np.nan) * 1e6,
+                         "shot_peak_mean_V": pk.mean(),
                          "shot_peak_relstd": pk.std() / pk.mean(),
                          "last_over_first": pk[-1] / pk[0]})
             if src in ("start", "stop"):
@@ -306,9 +309,10 @@ def study_fc(db, st, data_root) -> dict:
             run = db.run(key)
             x0 = 0 if src == "start" else n_start.get(key, 0)
             m = starts.get(key, pk.mean())
-            col = energy_color(int(run.laser.energy_mJ))
+            mj = run.laser.energy_mJ
+            col = energy_color(int(mj)) if mj is not None else "black"
             p.add(Line(np.arange(len(pk)) + x0, pk / m,
-                       f"{key} ({run.target}, {run.laser.energy_mJ:g} mJ)"
+                       f"{key} ({run.target}, {'?' if mj is None else f'{mj:g}'} mJ)"
                        if src == "start" or key not in starts else None, col,
                        dash=ELEMENT_DASH.get(run.target, "solid"), group=key),
                   Points(np.arange(len(pk)) + x0, pk / m, None, col, group=key,

@@ -31,6 +31,7 @@ pyproject.toml     package metadata and dependencies
 | `EIA_DATA_ROOT` | `...\NewEIASoftware\data` | raw data and legacy results, **read-only** |
 | `EIA_PROCESSED_ROOT` | `...\NewEIASoftware\processed` | everything the software writes per run |
 | `EIA_STUDIES_ROOT` | `...\NewEIASoftware\studies` | cross-run comparisons |
+| `EIA_FITS_ROOT` (optional) | `...\NewEIASoftware\fits` (next to `processed`) | fits made in the window: `<run>\cbs_fit.json`, `<run>\peaks\p<U>.txt`, `<run>\fc_baseline.json`; never deleted by the pipeline, back them up |
 
 Data layout, one folder per run (`20250513`, `2026_1103 Nb analysis`, ...):
 
@@ -65,6 +66,22 @@ Folders whose name is a canonical name plus `~`, `_`, `_0`, `_b`, ... (for examp
 `Output~`, `EIA-Results_`) or that contain `wrong` are temporary copies with wrong
 results and are ignored. Other folders (`Miscellaneous`, `LowStateCharge`,
 `4_MultiShotSameSpot`, ...) are listed but not used.
+
+### The eiakit window (`eiakit gui`)
+
+| tab | what it does |
+|---|---|
+| Runs | every run with the state of its stages (hover a cell: why it is stale); Run selected / all, open the run report, start the CBS fit store |
+| Studies | figures of a study, method studies, snapshots and diffs; double-click a page to open it |
+| Settings | the switches of `db\pipeline.toml`; Compare one setting (`eiakit compare`) |
+| CBS fitter | per charge state on the current calibration: click the peak, Fit (kT scan), kT from FWHM, add / remove labelled components (fast, slow, ...), windows; Save writes `fits\<run>\cbs_fit.json` (old version kept), then Run updates the cbs and report stages |
+| Peaks | the raw SEM shots of one voltage: refit every line at the file voltage, move a window (click), drop a line; Save replaces that voltage's Output rows in the calibration |
+| FC baseline | the FC average and its pre-trigger region; pick the pedestal per run (used with `fc_baseline = "picked"`) |
+
+Long actions run `eiakit ...` in the background; the output appears in the log at the
+bottom. Without a fit store the legacy `CBS_fit_results` file is used, so nothing changes
+until something is saved (`eiakit fit-import` copies the legacy fits into the store: all
+paper numbers identical).
 
 ### Corrections to the legacy analysis (Step 11)
 
@@ -189,6 +206,9 @@ eiakit methods NAME [--only P ...] [--boot N]
                                      shot-to-shot FC), shots (N12 bootstrap over shots)
 eiakit --set SECTION.KEY=VALUE <command>
                                      override a setting for one command only
+eiakit gui                           the eiakit window (see below)
+eiakit fit-import [KEY ...] [--force]
+                                     start the CBS fit store from the legacy fit files
 eiakit import-exclusions FILE [--study PRL_AlNb]
                                      convert a legacy ExclusionList.txt to the study's [exclude] table
 ```
