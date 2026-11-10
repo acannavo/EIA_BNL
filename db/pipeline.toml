@@ -59,7 +59,8 @@ zbar_clip_negative = true     # np.clip(J, 0) (I5)
 zbar_mask         = "none"    # I4: "none" (legacy: zero fill outside each z's measured range) | "measured"
 zbar_fill         = "zero"    # I4: "zero" (legacy) | "extrapolate" (power law through the 3 outer points of each z) | "edge" (flat at the edge value: extreme bound)
 zbar_mask_tol     = 0.05      # I4: invalid where the ions possibly dropped outside the measured ranges exceed this fraction
-divide_by_z       = false     # Jacobian grids: charge (false) or ions (true) per energy (I7)
+# I3 / I7: the spectra figures show J_z (charge) vs t and u, and ions per energy (dN/dlnE next to
+# dN/dE, J_z / z), with the units in the axis labels; the legacy DIVIDE_BY_Z switch is not needed.
 
 # ==========================================================================
 #  Phase C corrections (Step 11). Each switch is recorded in the manifests of the stages
