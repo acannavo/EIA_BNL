@@ -499,6 +499,14 @@ def cmd_diff(args) -> int:
     out = paths.studies / args.name / "diffs"
     out.mkdir(parents=True, exist_ok=True)
     res["table"].to_csv(out / f"{args.a}__{args.b}.csv", index=False)
+    switches = [k for k in ("corrections", "calibration")
+                if res["meta_a"].get(k) != res["meta_b"].get(k)]
+    if args.changelog and not switches and not (s.changed > 0).any() and not args.force:
+        print(f"\nNOT written to changelog.md: '{args.a}' and '{args.b}' have the same "
+              f"switches ({res['meta_b'].get('corrections')}) and the same numbers.\n"
+              "Probably the switch was set before the first snapshot: set it back, "
+              "eiakit run, snapshot again (same label overwrites). --force to write anyway.")
+        return 1
     if args.changelog:
         entry = changelog_entry(res, args.a, args.b, args.changelog, args.text or "")
         log = paths.studies / args.name / "changelog.md"
@@ -605,6 +613,8 @@ def main(argv=None) -> int:
     p.add_argument("b")
     p.add_argument("--changelog", metavar="TITLE", help="append a section to changelog.md")
     p.add_argument("--text", help="explanation for the changelog entry")
+    p.add_argument("--force", action="store_true",
+                   help="write the changelog entry even if nothing changed")
     p.set_defaults(func=cmd_diff)
     p = sub.add_parser("import-exclusions", help="legacy ExclusionList.txt -> study [exclude]")
     p.add_argument("file")

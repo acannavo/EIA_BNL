@@ -68,10 +68,14 @@ def main():
     vb, vs = file_version(base_dll), file_version(sys_dll)
     print(f"msvcp140.dll base : {vb or 'not present'}  ({base_dll})")
     print(f"msvcp140.dll sys32: {vs or 'not present'}")
-    cause = vb is not None and major_minor(vb) < (14, 40)
+    def full(v):
+        return tuple(int(x) for x in v.split(".")) if v else None
+    cause = not ok and vb is not None and (major_minor(vb) < (14, 40)
+                                           or (vs is not None and full(vb) < full(vs)))
     if cause:
-        print("\n=> CAUSE CONFIRMED: the base Python folder has msvcp140.dll "
-              f"{vb} (< 14.40), loaded before the system one ({vs}).")
+        print("\n=> LIKELY CAUSE: the base Python folder has msvcp140.dll "
+              f"{vb}, older than the system one ({vs}) and loaded first; recent Qt "
+              "builds need the newer runtime.")
     elif ok:
         print("\n=> PySide6 loads: nothing to fix.")
     else:

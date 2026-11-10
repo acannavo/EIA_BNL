@@ -72,7 +72,7 @@ Each correction is a switch in `db\pipeline.toml`, off by default (= legacy numb
 what one moves:
 
 ```powershell
-eiakit run; eiakit snapshot PRL_AlNb --label legacy
+eiakit run; eiakit snapshot PRL_AlNb --label legacy     # with the switch still OFF
 # switch it on in db\pipeline.toml, e.g. [corrections] mass_constants = "codata"
 eiakit run; eiakit snapshot PRL_AlNb --label I1
 eiakit diff PRL_AlNb legacy I1 --changelog "I1: CODATA mass unit and elementary charge"
