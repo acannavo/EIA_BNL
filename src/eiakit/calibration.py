@@ -80,10 +80,11 @@ def average_fc(traces, n_points: int):
 
 
 def calibrate(rows: pd.DataFrame, fc_traces, fc_baseline_V: float, eia, fc, pipeline: dict,
-              cfy_1m_override: float | None = None) -> dict:
+              cfy_1m_override: float | None = None, fc_peak_override: float | None = None) -> dict:
     """
     The untitled27 chain. cfy_1m_override uses a given CFY_1m instead of matching the FC
-    (to rebuild a legacy checkpoint when its FC traces are not available).
+    (to rebuild a legacy checkpoint when its FC traces are not available);
+    fc_peak_override a given FC peak [V] after the pedestal (legacy_fc_peak()).
     """
     L_EIA, L_FC = eia.L_m, fc.L_m
     tof_common, interp, segs, m_values, z_values = interpolate_spectra(
@@ -99,7 +100,12 @@ def calibrate(rows: pd.DataFrame, fc_traces, fc_baseline_V: float, eia, fc, pipe
     CFArea = 1.0 / (np.pi * fc.aperture_radius_cm ** 2)
     CFCurrent = 1.0 / fc.R_load_ohm
 
-    if cfy_1m_override is None:
+    if fc_peak_override is not None:
+        fc_t = fc_v = None
+        max_val_avg = fc_peak_override
+        CFY_1m = max_val_avg * L1 / max_val_sum
+        CFY_EIA = max_val_avg * L2 / max_val_sum
+    elif cfy_1m_override is None:
         fc_t, fc_v = average_fc(fc_traces, int(pipeline["fc_grid_points"]))
         fc_v = fc_v - fc_baseline_V
         max_val_avg = fc_v.max()
@@ -143,18 +149,23 @@ def calibrate(rows: pd.DataFrame, fc_traces, fc_baseline_V: float, eia, fc, pipe
     }
 
 
+def legacy_fc_peak(legacy_ck: dict, fc) -> float:
+    """FC peak after the pedestal [V] used by untitled27: CFY_1m * max(sum EIA) / L_FC^3."""
+    s1 = sum(legacy_ck["corrected_spectra_1m"].values())
+    max_val_sum = s1.max() / (legacy_ck["CFY_1m"] * legacy_ck["CFArea"] * legacy_ck["CFCurrent"])
+    L_fc = float(legacy_ck.get("L_FC", fc.L_m))
+    return float(legacy_ck["CFY_1m"] * max_val_sum / (1.0 / L_fc) ** (-3))
+
+
 def recover_fc_baseline(legacy_ck: dict, fc_traces, fc_grid_points: int, eia, fc) -> float:
     """
     The FC pedestal picked by hand in untitled27 was not saved (N7). It follows from the
     legacy checkpoint: FC peak after baseline = CFY_1m * max(sum EIA) / L_FC^3, and
     baseline = max(raw FC average) - that peak.
     """
-    s1 = sum(legacy_ck["corrected_spectra_1m"].values())
-    max_val_sum = s1.max() / (legacy_ck["CFY_1m"] * legacy_ck["CFArea"] * legacy_ck["CFCurrent"])
     # L_FC of the legacy checkpoint, not of the db: the pedestal is a property of the FC
     # traces, so a later correction of L_FC / aperture in the db must not be absorbed here
-    L_fc = float(legacy_ck.get("L_FC", fc.L_m))
-    fc_peak = legacy_ck["CFY_1m"] * max_val_sum / (1.0 / L_fc) ** (-3)
+    fc_peak = legacy_fc_peak(legacy_ck, fc)
     _, v = average_fc(fc_traces, fc_grid_points)
     return float(v.max() - fc_peak)
 
@@ -234,10 +245,17 @@ def run_calibration(db, run, data_root, fc_source="start", baseline="legacy",
             used.append(f"{d}/{p.name}")
     ck_path = folder / "EIA-Results" / "pipeline_checkpoint.npy"
     old = load_checkpoint(ck_path) if ck_path.is_file() else None
-    cfy = None
-    if not traces and not legacy_cfy and pipe.get("fc_missing", "error") == "legacy_cfy":
+    cfy = fc_peak = None
+    missing = pipe.get("fc_missing", "error")
+    if not traces and not legacy_cfy and missing == "legacy_cfy":
         legacy_cfy = True                     # explicit db choice; recorded in the summary
-    if legacy_cfy:
+    if not traces and not legacy_cfy and missing == "legacy_fc_peak":
+        if old is None:
+            return {"error": "fc_missing = legacy_fc_peak needs the legacy checkpoint"}
+        fc_peak, B = legacy_fc_peak(old, run.fc), 0.0
+        how = ("no FC traces: FC peak from the legacy checkpoint (exact for corrections "
+               "that do not touch the FC)")
+    elif legacy_cfy:
         if old is None:
             return {"error": "legacy CFY needs the legacy checkpoint"}
         cfy, B, how = old["CFY_1m"], 0.0, "CFY_1m taken from the legacy checkpoint"
@@ -257,9 +275,10 @@ def run_calibration(db, run, data_root, fc_source="start", baseline="legacy",
         B, how = float(np.mean(pre)), f"mean of the FC signal before t = 0 ({pre.size} samples)"
     else:
         B, how = float(baseline), "fixed value"
-    if not traces and cfy is None:
+    if not traces and cfy is None and fc_peak is None:
         return {"error": f"no FC traces in {fc_dirs(run, fc_source)}"}
-    res = calibrate(rows, traces, B, run.eia, run.fc, pipe, cfy_1m_override=cfy)
+    res = calibrate(rows, traces, B, run.eia, run.fc, pipe, cfy_1m_override=cfy,
+                    fc_peak_override=fc_peak)
     info = {"run": run.key, "fc_source": fc_source, "fc_files": used, "fc_baseline_V": B,
             "baseline_method": how, "fc_peak_V": res["fc_peak_V"], "CFY_1m": res["CFY_1m"],
             "CFY_EIA": res["CFY_EIA"], "n_output_rows": len(rows),

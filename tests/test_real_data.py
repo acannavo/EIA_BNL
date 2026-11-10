@@ -42,6 +42,11 @@ def test_checkpoint_rebuilt_from_output(key):
     d = compare_checkpoints(new, old)
     bad = {k: v for k, v in d.items() if not isinstance(v, float) or v > 1e-9}
     assert not bad, bad
+    # the FC peak recovered from the checkpoint gives the same CFY (fc_missing = legacy_fc_peak)
+    from eiakit.calibration import legacy_fc_peak
+    new2 = calibrate(rows, None, 0.0, run.eia, run.fc, db.pipeline["calibration"],
+                     fc_peak_override=legacy_fc_peak(old, run.fc))
+    assert abs(new2["CFY_1m"] / old["CFY_1m"] - 1) < 1e-12
 
 
 SLOW = os.environ.get("EIA_SLOW") == "1"

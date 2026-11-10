@@ -30,7 +30,7 @@ n_interp          = 100000    # common TOF grid of the EIA spectra
 fc_grid_points    = 1000      # common grid of the FC traces (N7: coarse)
 fc_source         = "start"   # FC traces used: "start" | "stop" | "both"
 fc_baseline       = "legacy"  # FC pedestal: "legacy" (recovered from the legacy checkpoint, N7) | "pretrigger" | volts
-fc_missing        = "error"   # no FC traces: "error" | "legacy_cfy" (take CFY_1m from the legacy checkpoint)
+fc_missing        = "error"   # no FC traces: "error" | "legacy_cfy" (CFY_1m of the legacy checkpoint) | "legacy_fc_peak" (FC peak of the legacy checkpoint: CFY follows changes of the EIA side)
 method            = "peak"    # "peak" (legacy, CFY = max FC / max sum EIA) | "area" (I2)
 interp_fill       = "zero"    # "zero" (legacy) | "nan" (I4: mask outside the measured range)
 output_duplicates = "last_per_mz"   # N1: "all" (legacy: every appended save of p<U>.txt) | "last_per_mz" (newest fit of each charge state) | "last_save" (only the last save)
