@@ -86,6 +86,19 @@ def test_legacy_cbs_replay(key):
     assert res["status"].startswith("reproduced"), res["summary"]
 
 
+@pytest.mark.parametrize("key", [k for k in RUNS if (ROOT / k / "EIA-Results").is_dir()])
+def test_cbs_replay_invariant_under_codata_constants(key):
+    """I1: CODATA masses / charge only rescale kT, V0; the CBS curves are unchanged."""
+    from eiakit.cbs import replay_run_cbs, run_model
+    d = load_database()
+    d.pipeline.setdefault("corrections", {})["mass_constants"] = "codata"
+    res = replay_run_cbs(d, d.run(key), ROOT)
+    if res["status"] == "missing files":
+        pytest.skip("no CBS files / checkpoint")
+    assert res["status"].startswith("reproduced"), res["summary"]
+    assert run_model(d, d.run(key), ROOT)["profile"] == "corrected"
+
+
 # printed by plot_eia_powerLaw_test.py on the legacy checkpoints (scale-invariant numbers)
 LEGACY_ZBAR = {   # run: (C, b, sig_b, n, R2, E_lo, E_hi, npts)
     "20250513": (0.3482, 0.3374, 0.0002, 2.964, 0.9709, 20.0, 9999.7, 67765),

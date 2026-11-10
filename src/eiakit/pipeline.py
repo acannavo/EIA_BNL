@@ -265,8 +265,10 @@ def _cal_execute(db, run, ctx):
 # cbs ----------------------------------------------------------------------------------
 
 def _cbs_params(db, run):
-    prof = run.legacy.profile_cbs
+    prof = db.profile_for(run, "cbs")
     return {"pipeline.cbs": db.pipeline["cbs"], "constants": _jsonable(db.profile(prof)),
+            "profile": prof, "corrections.mass_constants":
+                db.corrections().get("mass_constants", "legacy"),
             "mass_amu": db.mass_amu(run.target, prof), "mass_labels": run.mass_labels,
             "fit_file_labels": run.fit_file_labels, "target": run.target,
             "eia.L_m": run.eia.L_m}
@@ -314,7 +316,8 @@ def study_of(db, run):
 def _report_params(db, run):
     st = study_of(db, run)
     return {"pipeline.analysis": db.pipeline.get("analysis", {}),
-            "constants": _jsonable(db.profile(run.legacy.profile_analysis)),
+            "constants": _jsonable(db.profile(db.profile_for(run, "analysis"))),
+            "corrections": db.corrections(),
             "study": None if st is None else {"name": st.name,
                                               "zbar": _jsonable(st.zbar),
                                               "exclude": st.exclude.get(run.key, {})},
@@ -344,7 +347,7 @@ def _report_execute(db, run, ctx):
         "zb": None, "fit": None}
     items = []
     meta = (f"{run.target}, laser {run.laser.energy_mJ} mJ, L_EIA = {run.eia.L_m} m, "
-            f"L_FC = {run.fc.L_m} m; profile {run.legacy.profile_analysis}"
+            f"L_FC = {run.fc.L_m} m; profile {db.profile_for(run, 'analysis')}"
             + (f"; excluded z {ds.excluded_z} (study {st.name})" if st and ds.excluded_z else "")
             + (f"; <b>provisional: {', '.join(run.provisional)}</b>" if run.provisional else "")
             + f"<br>eiakit {__version__}, git {git_commit()}, {time.strftime('%Y-%m-%d %H:%M')}")

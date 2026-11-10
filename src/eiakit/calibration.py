@@ -226,6 +226,8 @@ def run_calibration(db, run, data_root, fc_source="start", baseline="legacy",
     ck_path = folder / "EIA-Results" / "pipeline_checkpoint.npy"
     old = load_checkpoint(ck_path) if ck_path.is_file() else None
     cfy = None
+    if not traces and not legacy_cfy and pipe.get("fc_missing", "error") == "legacy_cfy":
+        legacy_cfy = True                     # explicit db choice; recorded in the summary
     if legacy_cfy:
         if old is None:
             return {"error": "legacy CFY needs the legacy checkpoint"}

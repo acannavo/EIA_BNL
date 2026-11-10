@@ -394,13 +394,15 @@ def rounding_bounds(model: CBSModel, comps, i, curve, z) -> dict:
             "bound_I_peak": b[3]}
 
 
-def replay_fit_file(model: CBSModel, curves: dict, fit, areas=None) -> dict:
+def replay_fit_file(model: CBSModel, curves: dict, fit, areas=None,
+                    comps_by_z: dict | None = None) -> dict:
     """
     Recompute the stored quantities of one CBS fit file from (kT, V0, A, window) and the
     checkpoint: fit metrics vs the fit table, chi2 vs the text blocks, areas vs the
     areas table, and the origin of each component. Returns {components, areas, totals}.
     """
-    comps_by_z = components_from_fit_file(fit)
+    if comps_by_z is None:
+        comps_by_z = components_from_fit_file(fit)
     comp_rows, area_tabs, tot_rows = [], [], []
     for z, comps in comps_by_z.items():
         curve = curves.get(z)
@@ -467,14 +469,28 @@ def run_model(db, run, data_root, ck: dict | None = None) -> dict:
         ck = load_checkpoint(ck_p)
     else:
         ck_p = "<given>"
-    prof = run.legacy.profile_cbs
+    prof = db.profile_for(run, "cbs")
     m_kg, e_C = db.mass_kg(run.target, prof), db.e_C(prof)
     L = fit.header.L_EIA_m or run.eia.L_m
     per_ion = True if fit.header.per_ion is None else fit.header.per_ion
     tof, curves, exp = build_signals(ck, run.mass_labels, per_ion)
     model = CBSModel.from_settings(tof, m_kg, L, e_C, db.pipeline["cbs"])
+    comps = components_from_fit_file(fit)
+    # the stored kT, V0 belong to the fit's constants (legacy profile; M_ION in the
+    # header); the shape depends on kT e / M and V0 e / M only, so another mass unit or
+    # charge rescales them and leaves times, FWHM and areas unchanged (I1)
+    leg = run.legacy.profile_cbs
+    m_old = fit.header.M_ION_kg or db.mass_kg(run.target, leg)
+    s = (m_kg / m_old) * (db.e_C(leg) / e_C)
+    if abs(s - 1) > 1e-12:
+        for cs in comps.values():
+            for c in cs:
+                if c.kT is not None:
+                    c.kT *= s
+                if c.V0 is not None:
+                    c.V0 *= s
     return {"status": "ok", "model": model, "curves": curves, "exp": exp, "fit": fit,
-            "areas": areas, "components": components_from_fit_file(fit), "profile": prof,
+            "areas": areas, "components": comps, "profile": prof, "param_scale": s,
             "per_ion": per_ion, "fit_path": fit_p, "areas_path": area_p, "ck_path": ck_p}
 
 
@@ -495,7 +511,7 @@ def replay_run_cbs(db, run, data_root, ck: dict | None = None) -> dict:
     model, curves, fit, areas = rm["model"], rm["curves"], rm["fit"], rm["areas"]
     prof, m_kg, L, fit_p, area_p, ck_p = (rm["profile"], model.m_kg, model.L_m, rm["fit_path"],
                                          rm["areas_path"], rm["ck_path"])
-    out = replay_fit_file(model, curves, fit, areas)
+    out = replay_fit_file(model, curves, fit, areas, rm["components"])
     comp, a = out["components"], out["areas_cmp"]
     dt = float(np.median(np.diff(model.tus)))
     s = {"n_components": int(len(comp)), "profile": prof, "M_ION_kg": m_kg,

@@ -30,6 +30,7 @@ n_interp          = 100000    # common TOF grid of the EIA spectra
 fc_grid_points    = 1000      # common grid of the FC traces (N7: coarse)
 fc_source         = "start"   # FC traces used: "start" | "stop" | "both"
 fc_baseline       = "legacy"  # FC pedestal: "legacy" (recovered from the legacy checkpoint, N7) | "pretrigger" | volts
+fc_missing        = "error"   # no FC traces: "error" | "legacy_cfy" (take CFY_1m from the legacy checkpoint)
 method            = "peak"    # "peak" (legacy, CFY = max FC / max sum EIA) | "area" (I2)
 interp_fill       = "zero"    # "zero" (legacy) | "nan" (I4: mask outside the measured range)
 
@@ -51,3 +52,16 @@ recomb_dz         = [1, 2, 3]
 zbar_min_frac     = 0.0
 zbar_clip_negative = true     # np.clip(J, 0) (I5)
 divide_by_z       = false     # Jacobian grids: charge (false) or ions (true) per energy (I7)
+
+# ==========================================================================
+#  Phase C corrections (Step 11). Each switch is recorded in the manifests of the stages
+#  it affects, so flipping one marks exactly those stages stale. Every change of a
+#  switch is documented in studies/<name>/changelog.md (eiakit snapshot / eiakit diff).
+# ==========================================================================
+[corrections]
+# I1  mass unit and elementary charge of the CBS stage and of the analysis:
+#     "legacy" = the per-run legacy profiles (proton mass as amu and Nb 92.206 in the
+#     2025 CBS fits, e = 1.602e-19); "codata" = profile 'corrected' (CODATA 2018).
+#     The stored CBS kT and V0 are rescaled by (M_new / M_old) (e_old / e_new): the CBS
+#     shape in time, the FWHM and the areas do not change.
+mass_constants = "legacy"

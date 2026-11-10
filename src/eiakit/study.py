@@ -17,6 +17,10 @@ from . import __version__
 from .pipeline import STAGES, git_commit, read_manifest, sha256_file, sha256_json
 
 
+def _settings_hash(db, st) -> str:
+    return sha256_json({"study": st.model_dump(mode="json"), "corrections": db.corrections()})
+
+
 def _load_ck(db, run, source, data_root, processed):
     """Checkpoint-like dict of a run + the run_id it came from."""
     if source == "legacy":
@@ -90,7 +94,7 @@ def powerlaw(db, study_name, data_root, processed, studies_root, source="pipelin
     write_html_page(out / "powerlaw.html", f"{study_name}: zbar(E) and spectra", items, meta)
     man = {"study": study_name, "part": "powerlaw", "source": source,
            "created": time.strftime("%Y-%m-%d %H:%M:%S"), "eiakit": __version__,
-           "git": git_commit(), "settings_hash": sha256_json(st.model_dump(mode="json")),
+           "git": git_commit(), "settings_hash": _settings_hash(db, st),
            "upstream": upstream, "reference_line": ref,
            "outputs": sorted(p.name for p in out.iterdir() if p.name != "manifest.json")}
     (out / "manifest.json").write_text(json.dumps(man, indent=2, default=str),
@@ -106,8 +110,8 @@ def study_status(db, study_name, part, data_root, processed, studies_root) -> di
         return {"state": "missing", "reasons": ["never made"]}
     man = json.loads(p.read_text(encoding="utf-8"))
     reasons = []
-    if man.get("settings_hash") != sha256_json(st.model_dump(mode="json")):
-        reasons.append("study settings changed")
+    if man.get("settings_hash") != _settings_hash(db, st):
+        reasons.append("study settings or [corrections] changed")
     if man.get("source") == "pipeline":
         stage = STAGES[man.get("upstream_stage", "calibration")]
         for key in man.get("upstream", {}):
@@ -172,7 +176,7 @@ def cbs(db, study_name, data_root, processed, studies_root, source="pipeline",
     write_html_page(out / "cbs.html", f"{study_name}: CBS components", items, meta)
     man = {"study": study_name, "part": "cbs", "source": source,
            "created": time.strftime("%Y-%m-%d %H:%M:%S"), "eiakit": __version__,
-           "git": git_commit(), "settings_hash": sha256_json(st.model_dump(mode="json")),
+           "git": git_commit(), "settings_hash": _settings_hash(db, st),
            "upstream": upstream, "upstream_stage": "cbs",
            "outputs": sorted(p.name for p in out.iterdir() if p.name != "manifest.json")}
     (out / "manifest.json").write_text(json.dumps(man, indent=2, default=str),
@@ -222,7 +226,7 @@ def reconstruction(db, study_name, data_root, processed, studies_root, source="p
             f"V0 = {r.V0_V:9.3f} V  A = {r.A:.4e}")
     man = {"study": study_name, "part": "reconstruction", "source": source,
            "created": time.strftime("%Y-%m-%d %H:%M:%S"), "eiakit": __version__,
-           "git": git_commit(), "settings_hash": sha256_json(st.model_dump(mode="json")),
+           "git": git_commit(), "settings_hash": _settings_hash(db, st),
            "upstream": upstream,
            "outputs": sorted(p.name for p in out.iterdir() if p.name != "manifest.json")}
     (out / "manifest.json").write_text(json.dumps(man, indent=2, default=str),
@@ -256,7 +260,7 @@ def collapse(db, study_name, data_root, processed, studies_root, source="pipelin
                                                            cs.cbs_t_source)
                                                for k in st.runs], ignore_index=True),
                                     st.exclude)}
-    prof = {k: db.run(k).legacy.profile_analysis for k in st.runs}
+    prof = {k: db.profile_for(db.run(k), "analysis") for k in st.runs}
     masses = {k: db.mass_kg(db.run(k).target, prof[k]) for k in st.runs}
     e_C = db.e_C(prof[st.runs[0]])
     lit = C.literature_series({k: db.literature[k] for k in cs.literature})
@@ -305,7 +309,7 @@ def collapse(db, study_name, data_root, processed, studies_root, source="pipelin
                     f"eiakit {__version__}, git {git_commit()}")
     man = {"study": study_name, "part": "collapse", "source": source,
            "created": time.strftime("%Y-%m-%d %H:%M:%S"), "eiakit": __version__,
-           "git": git_commit(), "settings_hash": sha256_json(st.model_dump(mode="json")),
+           "git": git_commit(), "settings_hash": _settings_hash(db, st),
            "upstream": upstream,
            "outputs": sorted(p.name for p in out.iterdir() if p.name != "manifest.json")}
     (out / "manifest.json").write_text(json.dumps(man, indent=2, default=str),

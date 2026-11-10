@@ -30,6 +30,10 @@ Command line entry point:  ``eiakit <command>``
     eiakit study NAME [--part P ...] [--source pipeline|legacy] [--html-only] [--status]
                                     cross-run figures (PDF, PNG, one HTML page) and tables
                                     in studies/<NAME>/<part>/
+    eiakit snapshot NAME --label L [--source pipeline|legacy] [--note TEXT]
+                                    every paper number of a study -> studies/<NAME>/snapshots
+    eiakit diff NAME A B [--changelog TITLE] [--text TEXT]
+                                    compare two snapshots; append the table to changelog.md
     eiakit import-exclusions FILE [--study NAME]
                                     legacy ExclusionList.txt -> the study's [exclude] table
 """
@@ -467,6 +471,48 @@ def cmd_study(args) -> int:
     return 0
 
 
+def cmd_snapshot(args) -> int:
+    from .paper import write_snapshot
+
+    db = load_database()
+    paths = get_paths()
+    if args.name not in db.studies:
+        print(f"ERROR: no study {args.name!r}")
+        return 2
+    p = write_snapshot(db, args.name, args.label, paths.data, paths.processed, paths.studies,
+                       args.source, args.note or "")
+    print(f"snapshot {args.label!r}: {sum(1 for _ in open(p)) - 1} numbers "
+          f"(corrections {db.corrections()}) -> {p}")
+    return 0
+
+
+def cmd_diff(args) -> int:
+    import pandas as pd
+
+    from .paper import changelog_entry, diff
+
+    paths = get_paths()
+    res = diff(paths.studies, args.name, args.a, args.b)
+    s = res["summary"]
+    with pd.option_context("display.width", 200, "display.max_rows", 200):
+        print(s.to_string(index=False, float_format=lambda v: f"{v:.4g}"))
+    out = paths.studies / args.name / "diffs"
+    out.mkdir(parents=True, exist_ok=True)
+    res["table"].to_csv(out / f"{args.a}__{args.b}.csv", index=False)
+    if args.changelog:
+        entry = changelog_entry(res, args.a, args.b, args.changelog, args.text or "")
+        log = paths.studies / args.name / "changelog.md"
+        if not log.is_file():
+            log.write_text(f"# {args.name}: changes to the paper numbers\n\n"
+                           "Each section: one correction, the switches that changed, and "
+                           "the paper numbers it moved (eiakit diff).\n\n", encoding="utf-8")
+        with open(log, "a", encoding="utf-8") as fh:
+            fh.write(entry)
+        print(f"changelog entry appended -> {log}")
+    print(f"full table -> {out / f'{args.a}__{args.b}.csv'}")
+    return 0
+
+
 def cmd_import_exclusions(args) -> int:
     db = load_database()
     excl = import_exclusion_list(Path(args.file), db, args.study)
@@ -547,6 +593,19 @@ def main(argv=None) -> int:
     p.add_argument("--html-only", action="store_true", help="skip PDF / PNG")
     p.add_argument("--status", action="store_true", help="only say whether it is up to date")
     p.set_defaults(func=cmd_study)
+    p = sub.add_parser("snapshot", help="save the paper numbers of a study")
+    p.add_argument("name")
+    p.add_argument("--label", required=True)
+    p.add_argument("--source", choices=["pipeline", "legacy"], default="pipeline")
+    p.add_argument("--note")
+    p.set_defaults(func=cmd_snapshot)
+    p = sub.add_parser("diff", help="compare two snapshots; optionally write a changelog entry")
+    p.add_argument("name")
+    p.add_argument("a")
+    p.add_argument("b")
+    p.add_argument("--changelog", metavar="TITLE", help="append a section to changelog.md")
+    p.add_argument("--text", help="explanation for the changelog entry")
+    p.set_defaults(func=cmd_diff)
     p = sub.add_parser("import-exclusions", help="legacy ExclusionList.txt -> study [exclude]")
     p.add_argument("file")
     p.add_argument("--study", default="PRL_AlNb")

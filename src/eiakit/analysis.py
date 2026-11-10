@@ -8,8 +8,9 @@ pipeline_checkpoint.npy) with J_z(t) per (m, z) in A cm^-2 at L_EIA, charge-weig
     zbar = C E^b fitted in log-log inside the study window (E_max per element, lower
            edge raised to where z = lower_from_z starts)
     Sheil-style spectra d2N/(dE dOmega) = N_z |dt/dE| L^2   [ions eV^-1 sr^-1 shot^-1]
-Constants and mass come from the run's 'profile_analysis' (legacy: amu 1.66053907e-27,
-e = 1.602e-19); exclusions ('all' lists of the study) remove charge states everywhere.
+Constants and mass: db.profile_for(run, 'analysis') (legacy: amu 1.66053907e-27,
+e = 1.602e-19; 'corrected' with [corrections] mass_constants = "codata");
+exclusions ('all' lists of the study) remove charge states everywhere.
 """
 from __future__ import annotations
 
@@ -47,7 +48,7 @@ class Dataset:
 def load_dataset(db, run, ck: dict, study=None, profile: str | None = None,
                  mass_labels=None) -> Dataset:
     """Per-z curves from a checkpoint, as load_species() of the legacy script."""
-    prof = profile or (run.legacy.profile_analysis if run.legacy else None)
+    prof = profile or db.profile_for(run, "analysis")
     labels = mass_labels if mass_labels is not None else run.mass_labels
     keep = None if labels is None else {int(m) for m in labels}
     spectra = ck["corrected_spectra"]

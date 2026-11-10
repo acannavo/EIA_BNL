@@ -94,3 +94,14 @@ def test_import_exclusion_list(db, tmp_path):
                   "2026_1103 Nb analysis": {"fast": [5]}}
     text = format_exclude_toml(ex)
     assert text.splitlines()[0] == "[exclude]" and '"20250611" = { slow = [24] }' in text
+
+
+def test_profile_for_follows_corrections_switch():
+    d = load_database()
+    r = d.run("20250513")
+    assert d.corrections().get("mass_constants", "legacy") == "legacy"
+    assert d.profile_for(r, "cbs") == r.legacy.profile("cbs")
+    d.pipeline.setdefault("corrections", {})["mass_constants"] = "codata"
+    assert d.profile_for(r, "cbs") == "corrected"
+    assert d.profile_for(r, "analysis") == "corrected"
+    assert d.profile_for(r, "peaks") == r.legacy.profile("peaks")   # peaks untouched by I1

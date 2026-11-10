@@ -66,6 +66,23 @@ Folders whose name is a canonical name plus `~`, `_`, `_0`, `_b`, ... (for examp
 results and are ignored. Other folders (`Miscellaneous`, `LowStateCharge`,
 `4_MultiShotSameSpot`, ...) are listed but not used.
 
+### Corrections to the legacy analysis (Step 11)
+
+Each correction is a switch in `db\pipeline.toml`, off by default (= legacy numbers). To see
+what one moves:
+
+```powershell
+eiakit run; eiakit snapshot PRL_AlNb --label legacy
+# switch it on in db\pipeline.toml, e.g. [corrections] mass_constants = "codata"
+eiakit run; eiakit snapshot PRL_AlNb --label I1
+eiakit diff PRL_AlNb legacy I1 --changelog "I1: CODATA mass unit and elementary charge"
+```
+
+| switch | values | effect |
+|---|---|---|
+| `[corrections] mass_constants` | `legacy` / `codata` | I1: CODATA amu, ion masses and e in CBS and analysis; CBS kT, V0 rescaled, curves unchanged |
+| `[calibration] fc_missing` | `error` / `legacy_cfy` | run without FC traces: stop, or use the legacy CFY of the checkpoint |
+
 ## Database (`db/`)
 
 All experiment-dependent values live here; the code contains no paths and no
@@ -148,6 +165,13 @@ eiakit study NAME [--part P ...] [--source pipeline|legacy] [--html-only] [--sta
                                      reconstruction  CBS decomposition + residuals of chosen z
                                      collapse        u2/u1 = z/z* (curve peaks and CBS fits),
                                                      energy scaling, literature, peak check
+eiakit snapshot NAME --label L [--source pipeline|legacy] [--note TEXT]
+                                     every paper number of the study (z̄ fits, Sheil yields, CBS
+                                     kT / V0 / ions, velocities, z*, energy fits) to
+                                     studies\<NAME>\snapshots\L.csv (+ .json: switches, git)
+eiakit diff NAME A B [--changelog TITLE] [--text TEXT]
+                                     what changed between two snapshots (diffs\A__B.csv);
+                                     --changelog appends the entry to studies\<NAME>\changelog.md
 eiakit import-exclusions FILE [--study PRL_AlNb]
                                      convert a legacy ExclusionList.txt to the study's [exclude] table
 ```

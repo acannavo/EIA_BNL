@@ -289,6 +289,18 @@ class Database:
                 if self._runs[k].include or not include_only]
 
     # -- constants
+    def corrections(self) -> dict:
+        return dict(self.pipeline.get("corrections", {}))
+
+    def profile_for(self, run, stage: str) -> str:
+        """Constants profile a stage uses for a run: the run's legacy profile, or
+        'corrected' when [corrections] mass_constants = "codata" (I1). The peak replay
+        and the audit always describe the legacy files and keep the legacy profiles."""
+        if stage in ("cbs", "analysis") and \
+                self.corrections().get("mass_constants", "legacy") == "codata":
+            return "corrected"
+        return run.legacy.profile(stage) if run.legacy else self.constants.default_profile
+
     def profile(self, name: str | None = None) -> ConstantsProfile:
         name = name or self.constants.default_profile
         try:
