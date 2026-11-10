@@ -72,11 +72,13 @@ Each correction is a switch in `db\pipeline.toml`, off by default (= legacy numb
 what one moves:
 
 ```powershell
-eiakit run; eiakit snapshot PRL_AlNb --label legacy     # with the switch still OFF
-# switch it on in db\pipeline.toml, e.g. [corrections] mass_constants = "codata"
-eiakit run; eiakit snapshot PRL_AlNb --label I1
-eiakit diff PRL_AlNb legacy I1 --changelog "I1: CODATA mass unit and elementary charge"
+eiakit compare PRL_AlNb calibration.output_duplicates all last_per_mz --changelog "N1: ..."
 ```
+
+`compare` runs the pipeline and snapshots the study with the first value, then with the
+second (no file to edit), prints the diff, appends the changelog entry and finally reruns
+with `db\pipeline.toml` as it is. Any setting can also be overridden for one command:
+`eiakit --set corrections.mass_constants=legacy run`. By hand: `eiakit snapshot`, `eiakit diff`.
 
 | switch | values | effect |
 |---|---|---|
@@ -173,6 +175,10 @@ eiakit snapshot NAME --label L [--source pipeline|legacy] [--note TEXT]
 eiakit diff NAME A B [--changelog TITLE] [--text TEXT]
                                      what changed between two snapshots (diffs\A__B.csv);
                                      --changelog appends the entry to studies\<NAME>\changelog.md
+eiakit compare NAME KEY A B [--changelog TITLE] [--text TEXT]
+                                     effect of one setting of db\pipeline.toml (see below)
+eiakit --set SECTION.KEY=VALUE <command>
+                                     override a setting for one command only
 eiakit import-exclusions FILE [--study PRL_AlNb]
                                      convert a legacy ExclusionList.txt to the study's [exclude] table
 ```

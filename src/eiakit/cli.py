@@ -34,6 +34,11 @@ Command line entry point:  ``eiakit <command>``
                                     every paper number of a study -> studies/<NAME>/snapshots
     eiakit diff NAME A B [--changelog TITLE] [--text TEXT]
                                     compare two snapshots; append the table to changelog.md
+    eiakit compare NAME KEY A B [--changelog TITLE] [--text TEXT]
+                                    effect of one setting: run + snapshot with KEY = A, then
+                                    B, diff (+ changelog); no file to edit
+    eiakit --set SECTION.KEY=VALUE <command>
+                                    override a db/pipeline.toml setting for one command
     eiakit import-exclusions FILE [--study NAME]
                                     legacy ExclusionList.txt -> the study's [exclude] table
 """
@@ -43,6 +48,7 @@ from __future__ import annotations
 import argparse
 import importlib.metadata as md
 import platform
+import re
 import sys
 import time
 from datetime import datetime
@@ -133,8 +139,43 @@ def _fmt(v, f="{:g}"):
     return "-" if v is None else f.format(v)
 
 
+# ------------------------------------------------------------------ --set overrides
+
+_OVERRIDES: list[tuple[str, str, object]] = []
+
+
+def _parse_value(v: str):
+    import tomllib
+    try:
+        return tomllib.loads(f"x = {v}")["x"]
+    except tomllib.TOMLDecodeError:
+        return v                                   # bare word -> string
+
+
+def _parse_set(item: str) -> tuple[str, str, object]:
+    """'calibration.output_duplicates=all' -> ('calibration', 'output_duplicates', 'all')."""
+    if "=" not in item or "." not in item.split("=", 1)[0]:
+        raise DatabaseError(f"--set {item!r}: use SECTION.KEY=VALUE of db/pipeline.toml, "
+                            "e.g. calibration.output_duplicates=all")
+    k, v = item.split("=", 1)
+    sec, key = k.strip().split(".", 1)
+    return sec, key, _parse_value(v.strip())
+
+
+def _apply_overrides(db, overrides):
+    for sec, key, val in overrides:
+        if sec not in db.pipeline or key not in db.pipeline[sec]:
+            raise DatabaseError(f"--set {sec}.{key}: no such setting in db/pipeline.toml")
+        db.pipeline[sec][key] = val
+    return db
+
+
+def _load_db(strict=True):
+    return _apply_overrides(load_database(strict=strict), _OVERRIDES)
+
+
 def cmd_runs(args) -> int:
-    db = load_database()
+    db = _load_db()
     try:
         data_root = get_paths().data
     except PathsNotConfigured:
@@ -169,7 +210,7 @@ def cmd_runs(args) -> int:
 
 
 def cmd_db_check(_args) -> int:
-    db = load_database(strict=False)
+    db = _load_db(strict=False)
     errors = db.check()
     n_inc = len(db.runs())
     print(f"database {db.root}: {len(db.run_keys)} runs ({n_inc} included), "
@@ -183,7 +224,7 @@ def cmd_db_check(_args) -> int:
 
 
 def cmd_files(args) -> int:
-    db = load_database()
+    db = _load_db()
     run = db.run(args.key)
     if not run.include:
         print(f"{run.key}: include = false in runs.toml (no acquisition format)")
@@ -242,7 +283,7 @@ def cmd_files(args) -> int:
 
 def cmd_audit(args) -> int:
     from .audit import audit_run, write_report
-    db = load_database()
+    db = _load_db()
     paths = get_paths()
     paths.ensure_output_dirs()
     study = db.study(args.study) if args.study else None
@@ -271,7 +312,7 @@ def cmd_calibrate(args) -> int:
     from .calibration import run_calibration
     from .store import save_calibration_h5
 
-    db = load_database()
+    db = _load_db()
     paths = get_paths()
     run = db.run(args.key)
     baseline = "legacy" if args.baseline == "auto" else args.baseline
@@ -307,7 +348,7 @@ def cmd_peaks(args) -> int:
 
     from .peaks import load_peak_state, replay_run, update_peak_state
 
-    db = load_database()
+    db = _load_db()
     paths = get_paths()
     run = db.run(args.key)
     out = paths.processed / run.key / "10_peaks"
@@ -336,7 +377,7 @@ def cmd_cbs(args) -> int:
 
     from .cbs import replay_run_cbs
 
-    db = load_database()
+    db = _load_db()
     paths = get_paths()
     keys = args.keys or [r.key for r in db.runs()]
     worst = 0
@@ -376,7 +417,7 @@ def _select_runs(db, keys):
 def cmd_status(args) -> int:
     from .pipeline import ORDER, STAGES, stage_status
 
-    db = load_database()
+    db = _load_db()
     paths = get_paths()
     stages = args.stage or ORDER
     mark = {"ok": "ok", "missing": "--", "failed": "FAILED", "stale": "STALE"}
@@ -414,7 +455,7 @@ def cmd_status(args) -> int:
 def cmd_run(args) -> int:
     from .pipeline import plan, run_stage
 
-    db = load_database()
+    db = _load_db()
     paths = get_paths()
     todo = plan(db, _select_runs(db, args.keys), paths.data, paths.processed,
                 stages=args.stage, force=args.force)
@@ -448,7 +489,7 @@ def cmd_run(args) -> int:
 def cmd_study(args) -> int:
     from . import study as S
 
-    db = load_database()
+    db = _load_db()
     paths = get_paths()
     if args.name not in db.studies:
         print(f"ERROR: no study {args.name!r}; known: {', '.join(sorted(db.studies))} "
@@ -474,7 +515,7 @@ def cmd_study(args) -> int:
 def cmd_snapshot(args) -> int:
     from .paper import write_snapshot
 
-    db = load_database()
+    db = _load_db()
     paths = get_paths()
     if args.name not in db.studies:
         print(f"ERROR: no study {args.name!r}")
@@ -522,7 +563,7 @@ def cmd_diff(args) -> int:
 
 
 def cmd_import_exclusions(args) -> int:
-    db = load_database()
+    db = _load_db()
     excl = import_exclusion_list(Path(args.file), db, args.study)
     print(f"# from {args.file}  ->  replace the [exclude] table at the end of "
           f"db/studies/{args.study}.toml with:\n")
@@ -530,9 +571,39 @@ def cmd_import_exclusions(args) -> int:
     return 0
 
 
+def cmd_compare(args) -> int:
+    """Run the pipeline and snapshot the study with KEY = A, then KEY = B, then diff."""
+    global _OVERRIDES
+    sec, key, _ = _parse_set(f"{args.key}=x")
+    base = _OVERRIDES
+    labels = []
+    for val in (args.a, args.b):
+        _OVERRIDES = [*base, (sec, key, _parse_value(val))]
+        lab = re.sub(r"[^A-Za-z0-9_.-]+", "-", f"{key}-{val}")
+        print(f"\n=== {sec}.{key} = {val}  (snapshot '{lab}')")
+        rc = cmd_run(argparse.Namespace(keys=[], stage=None, force=False, dry_run=False))
+        if rc:
+            print("pipeline failed: stopping")
+            return rc
+        rc = cmd_snapshot(argparse.Namespace(name=args.name, label=lab, source="pipeline",
+                                             note=f"eiakit compare {args.key} {args.a} {args.b}"))
+        if rc:
+            return rc
+        labels.append(lab)
+    _OVERRIDES = base
+    print("\n=== diff")
+    rc = cmd_diff(argparse.Namespace(name=args.name, a=labels[0], b=labels[1],
+                                     changelog=args.changelog, text=args.text, force=False))
+    print("\n=== back to db/pipeline.toml as it is")
+    cmd_run(argparse.Namespace(keys=[], stage=None, force=False, dry_run=False))
+    return rc
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="eiakit", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--set", action="append", default=[], metavar="SECTION.KEY=VALUE",
+                    help="override a db/pipeline.toml setting for this command only")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("info", help="environment, paths, run folders").set_defaults(func=cmd_info)
     p = sub.add_parser("checksum", help="SHA-256 manifest of a folder tree")
@@ -616,12 +687,22 @@ def main(argv=None) -> int:
     p.add_argument("--force", action="store_true",
                    help="write the changelog entry even if nothing changed")
     p.set_defaults(func=cmd_diff)
+    p = sub.add_parser("compare", help="effect of one setting: run + snapshot with A, then B, diff")
+    p.add_argument("name", help="study, e.g. PRL_AlNb")
+    p.add_argument("key", help="setting of db/pipeline.toml, e.g. calibration.output_duplicates")
+    p.add_argument("a", help="value before (e.g. the legacy one)")
+    p.add_argument("b", help="value after")
+    p.add_argument("--changelog", metavar="TITLE", help="append the entry to changelog.md")
+    p.add_argument("--text", help="explanation for the changelog entry")
+    p.set_defaults(func=cmd_compare)
     p = sub.add_parser("import-exclusions", help="legacy ExclusionList.txt -> study [exclude]")
     p.add_argument("file")
     p.add_argument("--study", default="PRL_AlNb")
     p.set_defaults(func=cmd_import_exclusions)
     args = ap.parse_args(argv)
     try:
+        global _OVERRIDES
+        _OVERRIDES = [_parse_set(x) for x in args.set]
         return args.func(args)
     except (PathsNotConfigured, DatabaseError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

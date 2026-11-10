@@ -105,3 +105,16 @@ def test_profile_for_follows_corrections_switch():
     assert d.profile_for(r, "cbs") == "corrected"
     assert d.profile_for(r, "analysis") == "corrected"
     assert d.profile_for(r, "peaks") == r.legacy.profile("peaks")   # peaks untouched by I1
+
+
+def test_cli_set_overrides():
+    from eiakit.cli import _apply_overrides, _parse_set
+    assert _parse_set("calibration.output_duplicates=all") == ("calibration",
+                                                               "output_duplicates", "all")
+    assert _parse_set("calibration.n_interp=5000")[2] == 5000
+    d = _apply_overrides(load_database(), [_parse_set("corrections.mass_constants=legacy")])
+    assert d.corrections()["mass_constants"] == "legacy"
+    with pytest.raises(DatabaseError):
+        _apply_overrides(load_database(), [_parse_set("calibration.nope=1")])
+    with pytest.raises(DatabaseError):
+        _parse_set("output_duplicates=all")
