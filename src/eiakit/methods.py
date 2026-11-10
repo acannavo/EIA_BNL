@@ -21,6 +21,7 @@ import copy
 import dataclasses
 import json
 import time
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -361,7 +362,8 @@ def study_shots(db, st, dsets, data_root, n_boot: int = 30, seed: int = 1) -> di
         ufiles = np.unique(files)
         nfile = {f: int(nrow[files == f].max()) for f in ufiles}
         has = nrow >= 2                                     # rows with a shot-to-shot scatter
-        with np.errstate(divide="ignore", invalid="ignore"):
+        with np.errstate(divide="ignore", invalid="ignore"), warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)       # voltages with one shot
             relsc = np.nanstd(ind, axis=1, ddof=1) / np.sqrt(nrow) / np.abs(ave)
         f0 = analyze_zbar(ds, st.zbar, an)["fit"]
         Cs, bs = [], []
