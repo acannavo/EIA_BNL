@@ -33,7 +33,7 @@ fc_baseline       = "legacy"  # FC pedestal: "legacy" (recovered from the legacy
 fc_missing        = "error"   # no FC traces: "error" | "legacy_cfy" (take CFY_1m from the legacy checkpoint)
 method            = "peak"    # "peak" (legacy, CFY = max FC / max sum EIA) | "area" (I2)
 interp_fill       = "zero"    # "zero" (legacy) | "nan" (I4: mask outside the measured range)
-output_duplicates = "all"     # N1: "all" (legacy: every appended save of p<U>.txt) | "last_per_mz" (newest fit of each charge state) | "last_save" (only the last save)
+output_duplicates = "last_per_mz"   # N1: "all" (legacy: every appended save of p<U>.txt) | "last_per_mz" (newest fit of each charge state) | "last_save" (only the last save)
 
 [cbs]                         # cbs_manual_fitter_v12
 gamma             = 1.6666666666666667   # 5/3
