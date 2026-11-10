@@ -99,6 +99,63 @@ def keep_last_save(rows: pd.DataFrame, detail: pd.DataFrame | None,
     return pd.concat(keep, ignore_index=True), notes
 
 
+def resolve_overlaps(rows: pd.DataFrame, masses: dict[int, float], target_ms,
+                     res_floor: float = 0.002) -> tuple[pd.DataFrame, list]:
+    """
+    N8: untitled28 fits every (m, z) of the mass list in a +/-2 % window around its line,
+    so two lines closer than the window can both be fitted on the same peak, which then
+    counts twice in the summed EIA yield. Per Output file, at fixed U, TOF ~ sqrt(m/z):
+      line scale C = median TOF / sqrt(m/z) of the target-species rows;
+      resolution = max(res_floor, 3 x robust spread of the target rows around C);
+      each row is assigned to the nearest predicted line (its own if the lines are closer
+      than the resolution).
+    Two rows of different masses on one resolvable line: the row of that line is kept, the
+    other dropped. Two unresolvable lines (e.g. C3+/O4+) fitted on one peak: the target
+    species is kept, else the lower z. masses: {label m: mass in amu} (peaks.gui_masses).
+    Returns (rows, notes) with one note per dropped row.
+    """
+    target_ms = {int(m) for m in target_ms}
+    keep, notes = [], []
+    for f, g in rows.groupby("file", sort=False):
+        g = g.copy()
+        mz = np.array([masses[int(m)] / z for m, z in zip(g.m, g.z, strict=True)])
+        c = g.TOF.values / np.sqrt(mz)
+        is_t = g.m.isin(target_ms).values
+        C = float(np.median(c[is_t] if is_t.any() else c))
+        spread = float(np.median(np.abs(c[is_t] / C - 1))) if is_t.sum() > 2 else 0.0
+        res = max(res_floor, 3 * 1.4826 * spread)
+        pos = C * np.sqrt(mz)                       # predicted line of each row
+        key = list(zip(g.m.astype(int), g.z.astype(int), strict=True))
+        near = []
+        for i, t in enumerate(g.TOF.values):
+            j = int(np.argmin(np.abs(t / pos - 1)))
+            near.append(i if abs(pos[j] / pos[i] - 1) < res else j)
+        drop = set()
+        n = len(g)
+        for i in range(n):
+            for j in range(i + 1, n):
+                if key[i][0] == key[j][0]:
+                    continue
+                if abs(pos[i] / pos[j] - 1) < res:            # unresolvable lines
+                    if abs(g.TOF.values[i] / g.TOF.values[j] - 1) < res:
+                        rank = [(not is_t[k], key[k][1]) for k in (i, j)]
+                        drop.add(j if rank[0] <= rank[1] else i)
+                elif near[i] == near[j]:                       # one peak, two rows
+                    owner = near[i]
+                    if owner == i:
+                        drop.add(j)
+                    elif owner == j:
+                        drop.add(i)
+        idx = g.index[sorted(drop)]
+        for k in sorted(drop):
+            r = g.iloc[k]
+            notes.append({"file": f, "m": key[k][0], "z": key[k][1], "TOF": float(r.TOF),
+                          "on_line": f"{key[near[k]][0]}^{key[near[k]][1]}",
+                          "charge_yield": float(r.Yield * r.z)})
+        keep.append(g.drop(index=idx))
+    return pd.concat(keep, ignore_index=True), notes
+
+
 # ================================================================ untitled27 checkpoint
 
 def load_checkpoint(path: Path) -> dict:

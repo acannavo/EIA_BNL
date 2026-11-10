@@ -37,6 +37,8 @@ Command line entry point:  ``eiakit <command>``
     eiakit compare NAME KEY A B [--changelog TITLE] [--text TEXT]
                                     effect of one setting: run + snapshot with KEY = A, then
                                     B, diff (+ changelog); no file to edit
+    eiakit note NAME TITLE [--text TEXT]
+                                    changelog section for a check that changed no number
     eiakit --set SECTION.KEY=VALUE <command>
                                     override a db/pipeline.toml setting for one command
     eiakit import-exclusions FILE [--study NAME]
@@ -550,14 +552,7 @@ def cmd_diff(args) -> int:
         return 1
     if args.changelog:
         entry = changelog_entry(res, args.a, args.b, args.changelog, args.text or "")
-        log = paths.studies / args.name / "changelog.md"
-        if not log.is_file():
-            log.write_text(f"# {args.name}: changes to the paper numbers\n\n"
-                           "Each section: one correction, the switches that changed, and "
-                           "the paper numbers it moved (eiakit diff).\n\n", encoding="utf-8")
-        with open(log, "a", encoding="utf-8") as fh:
-            fh.write(entry)
-        print(f"changelog entry appended -> {log}")
+        print(f"changelog entry appended -> {_append_changelog(paths, args.name, entry)}")
     print(f"full table -> {out / f'{args.a}__{args.b}.csv'}")
     return 0
 
@@ -568,6 +563,28 @@ def cmd_import_exclusions(args) -> int:
     print(f"# from {args.file}  ->  replace the [exclude] table at the end of "
           f"db/studies/{args.study}.toml with:\n")
     print(format_exclude_toml(excl))
+    return 0
+
+
+def _append_changelog(paths, name: str, entry: str):
+    log = paths.studies / name / "changelog.md"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    if not log.is_file():
+        log.write_text(f"# {name}: changes to the paper numbers\n\n"
+                       "Each section: one correction, the switches that changed, and "
+                       "the paper numbers it moved (eiakit diff).\n\n", encoding="utf-8")
+    with open(log, "a", encoding="utf-8") as fh:
+        fh.write(entry)
+    return log
+
+
+def cmd_note(args) -> int:
+    """A changelog section without numbers (a correction checked to change nothing)."""
+    import time as _t
+    paths = get_paths()
+    entry = (f"## {args.title}\n\n*{_t.strftime('%Y-%m-%d %H:%M')}* — note, no paper "
+             f"number changed\n\n{args.text or ''}\n\n")
+    print(f"note appended -> {_append_changelog(paths, args.name, entry)}")
     return 0
 
 
@@ -687,6 +704,11 @@ def main(argv=None) -> int:
     p.add_argument("--force", action="store_true",
                    help="write the changelog entry even if nothing changed")
     p.set_defaults(func=cmd_diff)
+    p = sub.add_parser("note", help="append a changelog section without numbers")
+    p.add_argument("name")
+    p.add_argument("title")
+    p.add_argument("--text")
+    p.set_defaults(func=cmd_note)
     p = sub.add_parser("compare", help="effect of one setting: run + snapshot with A, then B, diff")
     p.add_argument("name", help="study, e.g. PRL_AlNb")
     p.add_argument("key", help="setting of db/pipeline.toml, e.g. calibration.output_duplicates")

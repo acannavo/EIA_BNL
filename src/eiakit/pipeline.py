@@ -225,7 +225,9 @@ def _peaks_execute(db, run, ctx):
 def _cal_params(db, run):
     return {"pipeline.calibration": db.pipeline["calibration"], "eia": _jsonable(run.eia),
             "fc": _jsonable(run.fc), "acquisition.fc": _jsonable(run.acquisition.fc),
-            "legacy.profile_calibration": run.legacy.profile_calibration}
+            "legacy.profile_calibration": run.legacy.profile_calibration,
+            "peaks.gui_masses": db.pipeline["peaks"]["gui_masses"],
+            "mass_labels": list(run.mass_labels)}
 
 
 def _cal_inputs(db, run, data_root, ins):

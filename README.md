@@ -68,7 +68,7 @@ results and are ignored. Other folders (`Miscellaneous`, `LowStateCharge`,
 
 ### Corrections to the legacy analysis (Step 11)
 
-Each correction is a switch in `db\pipeline.toml`, off by default (= legacy numbers), except I1 (`codata`) and N1 (`last_per_mz`), adopted 2026-11-09. To see
+Each correction is a switch in `db\pipeline.toml`, off by default (= legacy numbers), except the adopted ones: I1 (`codata`), N1 (`last_per_mz`), N8 (`nearest_line`). To see
 what one moves:
 
 ```powershell
@@ -84,7 +84,8 @@ with `db\pipeline.toml` as it is. Any setting can also be overridden for one com
 |---|---|---|
 | `[corrections] mass_constants` | `legacy` / `codata` | I1: CODATA amu, ion masses and e in CBS and analysis; CBS kT, V0 rescaled, curves unchanged |
 | `[calibration] output_duplicates` | `all` / `last_per_mz` / `last_save` | N1: rows of repeated saves in `Output\p<U>.txt`: all (legacy), the newest fit of each charge state, or only the last save |
-| `[calibration] fc_missing` | `error` / `legacy_cfy` | run without FC traces: stop, or use the legacy CFY of the checkpoint |
+| `[calibration] overlaps` | `keep_both` / `nearest_line` | N8: a peak fitted as two (m, z) (e.g. O⁺ on Nb⁶⁺, C³⁺/O⁴⁺) counted twice in the summed yield, or each row assigned to its nearest predicted line |
+| `[calibration] fc_missing` | `error` / `legacy_cfy` / `legacy_fc_peak` | run without FC traces: stop, use the legacy CFY, or the legacy FC peak (CFY then follows EIA-side corrections exactly) |
 
 ## Database (`db/`)
 

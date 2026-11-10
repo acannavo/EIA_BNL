@@ -53,3 +53,29 @@ def test_keep_last_save_modes():
     last, notes = keep_last_save(rows, detail, "last_save")
     assert list(last[last.file == "p600.txt"].z) == [1]
     assert notes[0]["method"] == "last save = Output_detail"
+
+
+def test_resolve_overlaps():
+    """N8: O+ fitted on the Nb6+ peak (one peak, two rows); C3+/O4+ unresolvable."""
+    import numpy as np
+
+    from eiakit.legacy import resolve_overlaps
+    M = {92: 92.906, 15: 15.99, 12: 12.01}
+    C = 1e-5
+
+    def t(m, z, off=0.0):
+        return C * np.sqrt(M[m] / z) * (1 + off)
+    rows = pd.DataFrame({
+        "file": ["p.txt"] * 7,
+        "m": [92, 92, 92, 92, 15, 12, 15], "z": [5, 6, 7, 8, 1, 3, 4],
+        "TOF": [t(92, 5), t(92, 6, 1e-4), t(92, 7), t(92, 8), t(92, 6, 2e-4),
+                t(12, 3), t(15, 4, 1e-4)],
+        "Yield": [-1.0, -2.0, -1.0, -1.0, -2.0, -0.1, -0.1]})
+    new, notes = resolve_overlaps(rows, M, [92])
+    got = {(n["m"], n["z"]) for n in notes}
+    assert got == {(15, 1), (15, 4)}, notes       # O+ on Nb6+; O4+ vs C3+ -> lower z kept
+    assert len(new) == 5 and not ((new.m == 92) & (new.z == 6)).sum() == 0
+    # an O+ fitted on its own line (resolved from Nb6+) is kept
+    rows.loc[4, "TOF"] = t(15, 1)
+    _, notes = resolve_overlaps(rows, M, [92])
+    assert {(n["m"], n["z"]) for n in notes} == {(15, 4)}

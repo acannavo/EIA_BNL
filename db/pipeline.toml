@@ -33,6 +33,8 @@ fc_baseline       = "legacy"  # FC pedestal: "legacy" (recovered from the legacy
 fc_missing        = "error"   # no FC traces: "error" | "legacy_cfy" (CFY_1m of the legacy checkpoint) | "legacy_fc_peak" (FC peak of the legacy checkpoint: CFY follows changes of the EIA side)
 method            = "peak"    # "peak" (legacy, CFY = max FC / max sum EIA) | "area" (I2)
 interp_fill       = "zero"    # "zero" (legacy) | "nan" (I4: mask outside the measured range)
+overlaps          = "nearest_line" # N8: "keep_both" (legacy: a peak fitted as two (m, z) counts twice) | "nearest_line" (each row on its nearest predicted line; one row per peak)
+overlap_res_floor = 0.002         # N8: lines closer than this (relative TOF) are unresolvable
 output_duplicates = "last_per_mz"   # N1: "all" (legacy: every appended save of p<U>.txt) | "last_per_mz" (newest fit of each charge state) | "last_save" (only the last save)
 
 [cbs]                         # cbs_manual_fitter_v12

@@ -218,7 +218,7 @@ def run_calibration(db, run, data_root, fc_source="start", baseline="legacy",
     import numpy as np
 
     from .acquisition import read_trace, scan_folder
-    from .legacy import keep_last_save, load_checkpoint, read_output_folder
+    from .legacy import keep_last_save, load_checkpoint, read_output_folder, resolve_overlaps
 
     folder = run.folder(data_root)
     pipe = db.pipeline["calibration"]
@@ -235,6 +235,13 @@ def run_calibration(db, run, data_root, fc_source="start", baseline="legacy",
     elif dup_mode != "all":
         return {"error": f"[calibration] output_duplicates = {dup_mode!r}: "
                          "use 'all', 'last_per_mz' or 'last_save'"}
+    n8, ov = [], pipe.get("overlaps", "keep_both")
+    if ov == "nearest_line":                                       # N8
+        masses = {int(k): float(v) for k, v in db.pipeline["peaks"]["gui_masses"].items()}
+        rows, n8 = resolve_overlaps(rows, masses, run.mass_labels,
+                                    float(pipe.get("overlap_res_floor", 0.002)))
+    elif ov != "keep_both":
+        return {"error": f"[calibration] overlaps = {ov!r}: use 'keep_both' or 'nearest_line'"}
     fmt = run.acquisition.fc
     traces, used = [], []
     for d in fc_dirs(run, fc_source):
@@ -283,9 +290,10 @@ def run_calibration(db, run, data_root, fc_source="start", baseline="legacy",
             "baseline_method": how, "fc_peak_V": res["fc_peak_V"], "CFY_1m": res["CFY_1m"],
             "CFY_EIA": res["CFY_EIA"], "n_output_rows": len(rows),
             "n_output_rows_in_files": n_rows_file, "N1_last_save": n1,
+            "N8_overlaps_dropped": n8,
             "pairs": len(res["corrected_spectra"]),
             "settings": {k: pipe.get(k) for k in ("n_interp", "fc_grid_points", "method",
-                                                  "interp_fill", "output_duplicates")}}
+                                                  "interp_fill", "output_duplicates", "overlaps")}}
     if old is not None:
         diff = compare_checkpoints(res, old)
         num = [v for v in diff.values() if isinstance(v, float)]
