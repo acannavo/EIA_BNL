@@ -82,3 +82,17 @@ def test_compare_detects_differences():
     b = {"x": np.ones(3) * (1 + 1e-6), "d": {(1, 2): np.ones(2)}, "l": [1, 2]}
     d = compare_checkpoints(a, b)
     assert d["x"] == pytest.approx(1e-6, rel=1e-5) and "different" in d["d"] and d["l"] == 0.0
+
+
+def test_fc_native_grid_and_smoothed_peak():
+    """N7: the 1000-point grid misses a narrow FC peak; native grid + moving average do not."""
+    import numpy as np
+
+    from eiakit.calibration import average_fc
+    t = np.arange(-1e-6, 39e-6, 4e-9)                        # 4 ns sampling, 10000 points
+    v = 0.03 * np.exp(-0.5 * ((t - 7.9e-6) / 30e-9) ** 2)  # 30 ns wide pulse
+    _, coarse = average_fc([(t, v)], 1000)
+    tn, native = average_fc([(t, v)], "native")
+    assert len(tn) == len(t)
+    assert native.max() > coarse.max()
+    assert abs(native.max() / 0.03 - 1) < 1e-3

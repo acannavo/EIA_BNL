@@ -85,6 +85,7 @@ with `db\pipeline.toml` as it is. Any setting can also be overridden for one com
 | `[corrections] mass_constants` | `legacy` / `codata` | I1: CODATA amu, ion masses and e in CBS and analysis; CBS kT, V0 rescaled, curves unchanged |
 | `[calibration] output_duplicates` | `all` / `last_per_mz` / `last_save` | N1: rows of repeated saves in `Output\p<U>.txt`: all (legacy), the newest fit of each charge state, or only the last save |
 | `[calibration] overlaps` | `keep_both` / `nearest_line` | N8: a peak fitted as two (m, z) (e.g. O⁺ on Nb⁶⁺, C³⁺/O⁴⁺) counted twice in the summed yield, or each row assigned to its nearest predicted line |
+| `[calibration] fc_grid_points`, `fc_peak` | `1000` / `native`; `max` / `smoothed` | N7: FC average on 1000 points (40 ns: peak −1.4 % on 20250611) or the scope sampling; peak = max, or max after a moving average of `fc_smooth_s` |
 | `[calibration] fc_missing` | `error` / `legacy_cfy` / `legacy_fc_peak` | run without FC traces: stop, use the legacy CFY, or the legacy FC peak (CFY then follows EIA-side corrections exactly) |
 
 ## Database (`db/`)

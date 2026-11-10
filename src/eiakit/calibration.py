@@ -66,11 +66,18 @@ def interpolate_spectra(rows: pd.DataFrame, n_points: int, fill: str = "zero"):
     return tof_common, data, segs, m_values, z_values
 
 
-def average_fc(traces, n_points: int):
-    """Section 6: every FC trace interpolated on a common grid of n_points, then averaged."""
+LEGACY_FC_GRID = 1000          # untitled27: FC traces averaged on 1000 points (N7)
+
+
+def average_fc(traces, n_points):
+    """Section 6: every FC trace interpolated on a common grid of n_points, then averaged.
+    n_points = 'native': the grid of the traces themselves (smallest sample step)."""
     t_min = min(float(np.min(t)) for t, _ in traces)
     t_max = max(float(np.max(t)) for t, _ in traces)
-    grid = np.linspace(t_min, t_max, num=n_points)
+    if n_points == "native":
+        dt = min(float(np.median(np.diff(t))) for t, _ in traces)
+        n_points = int(round((t_max - t_min) / dt)) + 1
+    grid = np.linspace(t_min, t_max, num=int(n_points))
     frames = []
     for t, v in traces:
         f = interp1d(t, v, kind="linear", bounds_error=False, fill_value=0.0)
@@ -100,15 +107,27 @@ def calibrate(rows: pd.DataFrame, fc_traces, fc_baseline_V: float, eia, fc, pipe
     CFArea = 1.0 / (np.pi * fc.aperture_radius_cm ** 2)
     CFCurrent = 1.0 / fc.R_load_ohm
 
+    def _grid(v):
+        return v if v == "native" else int(v)
+
+    def _peak(t, v):
+        """FC peak: 'max' of the average (legacy) or max after a moving average of fc_smooth_s."""
+        if pipeline.get("fc_peak", "max") == "smoothed":
+            w = max(1, int(round(float(pipeline.get("fc_smooth_s", 5e-8))
+                                 / float(np.median(np.diff(t))))))
+            v = np.convolve(v, np.ones(w) / w, mode="same")
+        return float(v.max()), float(t[int(np.argmax(v))])
+
+    fc_peak_t = None
     if fc_peak_override is not None:
         fc_t = fc_v = None
         max_val_avg = fc_peak_override
         CFY_1m = max_val_avg * L1 / max_val_sum
         CFY_EIA = max_val_avg * L2 / max_val_sum
     elif cfy_1m_override is None:
-        fc_t, fc_v = average_fc(fc_traces, int(pipeline["fc_grid_points"]))
+        fc_t, fc_v = average_fc(fc_traces, _grid(pipeline["fc_grid_points"]))
         fc_v = fc_v - fc_baseline_V
-        max_val_avg = fc_v.max()
+        max_val_avg, fc_peak_t = _peak(fc_t, fc_v)
         CFY_1m = max_val_avg * L1 / max_val_sum
         CFY_EIA = max_val_avg * L2 / max_val_sum
     else:
@@ -144,6 +163,7 @@ def calibrate(rows: pd.DataFrame, fc_traces, fc_baseline_V: float, eia, fc, pipe
         "m_values": m_values, "z_values_list": z_values,
         # new: what untitled27 did not store (N7)
         "fc_baseline_V": fc_baseline_V, "fc_peak_V": float(max_val_avg),
+        "fc_peak_t_s": fc_peak_t,
         "eia_sum_peak": float(max_val_sum),
         "fc_average": (fc_t, fc_v),
     }
@@ -157,7 +177,17 @@ def legacy_fc_peak(legacy_ck: dict, fc) -> float:
     return float(legacy_ck["CFY_1m"] * max_val_sum / (1.0 / L_fc) ** (-3))
 
 
-def recover_fc_baseline(legacy_ck: dict, fc_traces, fc_grid_points: int, eia, fc) -> float:
+def _per_shot_peaks(traces, baseline_V: float, pipe: dict) -> list:
+    """Peak of every FC shot after the pedestal, moving average of fc_smooth_s (drift check)."""
+    out = []
+    for t, v in traces:
+        w = max(1, int(round(float(pipe.get("fc_smooth_s", 5e-8)) / float(np.median(np.diff(t))))))
+        out.append(float(np.convolve(v - baseline_V, np.ones(w) / w, mode="same").max()))
+    return out
+
+
+def recover_fc_baseline(legacy_ck: dict, fc_traces, fc_grid_points: int = LEGACY_FC_GRID,
+                        eia=None, fc=None) -> float:
     """
     The FC pedestal picked by hand in untitled27 was not saved (N7). It follows from the
     legacy checkpoint: FC peak after baseline = CFY_1m * max(sum EIA) / L_FC^3, and
@@ -273,7 +303,9 @@ def run_calibration(db, run, data_root, fc_source="start", baseline="legacy",
             pre = np.concatenate([v[t < 0] for t, v in traces])
             B, how = float(np.mean(pre)), "pretrigger mean (no legacy checkpoint to recover)"
         else:
-            B = recover_fc_baseline(old, traces, int(pipe["fc_grid_points"]), run.eia, run.fc)
+            # on the legacy grid: the pedestal is what untitled27 used; a finer grid or
+            # another peak estimator (N7) must change the FC peak, not the pedestal
+            B = recover_fc_baseline(old, traces, LEGACY_FC_GRID, run.eia, run.fc)
             how = "recovered from the legacy checkpoint (N7)"
     elif baseline == "pretrigger":
         if not traces:
@@ -292,7 +324,10 @@ def run_calibration(db, run, data_root, fc_source="start", baseline="legacy",
             "n_output_rows_in_files": n_rows_file, "N1_last_save": n1,
             "N8_overlaps_dropped": n8,
             "pairs": len(res["corrected_spectra"]),
-            "settings": {k: pipe.get(k) for k in ("n_interp", "fc_grid_points", "method",
+            "fc_peak_t_s": res.get("fc_peak_t_s"),
+            "fc_per_shot_peak_V": _per_shot_peaks(traces, B, pipe),
+            "settings": {k: pipe.get(k) for k in ("n_interp", "fc_grid_points", "fc_peak",
+                                                  "fc_smooth_s", "method",
                                                   "interp_fill", "output_duplicates", "overlaps")}}
     if old is not None:
         diff = compare_checkpoints(res, old)

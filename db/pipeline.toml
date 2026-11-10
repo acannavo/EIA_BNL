@@ -27,7 +27,9 @@ max_u_clicks      = 30        # replay: search the U actually used within +/- th
 
 [calibration]                 # untitled27_REFACTORED_4
 n_interp          = 100000    # common TOF grid of the EIA spectra
-fc_grid_points    = 1000      # common grid of the FC traces (N7: coarse)
+fc_grid_points    = 1000      # common grid of the FC traces: 1000 (legacy, N7: 40 ns, peak -1 %) | "native" (scope sampling)
+fc_peak           = "max"     # FC peak: "max" of the average (legacy) | "smoothed" (max after a moving average of fc_smooth_s)
+fc_smooth_s       = 5.0e-8    # moving-average width for fc_peak = "smoothed" and the per-shot peaks
 fc_source         = "start"   # FC traces used: "start" | "stop" | "both"
 fc_baseline       = "legacy"  # FC pedestal: "legacy" (recovered from the legacy checkpoint, N7) | "pretrigger" | volts
 fc_missing        = "error"   # no FC traces: "error" | "legacy_cfy" (CFY_1m of the legacy checkpoint) | "legacy_fc_peak" (FC peak of the legacy checkpoint: CFY follows changes of the EIA side)
