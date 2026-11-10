@@ -64,4 +64,4 @@ divide_by_z       = false     # Jacobian grids: charge (false) or ions (true) pe
 #     2025 CBS fits, e = 1.602e-19); "codata" = profile 'corrected' (CODATA 2018).
 #     The stored CBS kT and V0 are rescaled by (M_new / M_old) (e_old / e_new): the CBS
 #     shape in time, the FWHM and the areas do not change.
-mass_constants = "legacy"
+mass_constants = "codata"

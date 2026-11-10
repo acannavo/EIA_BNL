@@ -68,7 +68,7 @@ results and are ignored. Other folders (`Miscellaneous`, `LowStateCharge`,
 
 ### Corrections to the legacy analysis (Step 11)
 
-Each correction is a switch in `db\pipeline.toml`, off by default (= legacy numbers). To see
+Each correction is a switch in `db\pipeline.toml`, off by default (= legacy numbers), except I1 (`codata`), adopted 2026-11-09. To see
 what one moves:
 
 ```powershell

@@ -12,6 +12,8 @@ from eiakit.db import load_database
 
 ROOT = Path(os.environ.get("EIA_DATA_ROOT", "/nonexistent"))
 db = load_database()
+# these tests compare with the legacy scripts: legacy constants (I1 off)
+db.pipeline.setdefault("corrections", {})["mass_constants"] = "legacy"
 RUNS = [r.key for r in db.runs() if (ROOT / r.key / "EIA-Results").is_dir()]
 
 pytestmark = pytest.mark.skipif(not RUNS, reason="no data (EIA_DATA_ROOT not set or empty)")

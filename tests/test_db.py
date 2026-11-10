@@ -99,7 +99,7 @@ def test_import_exclusion_list(db, tmp_path):
 def test_profile_for_follows_corrections_switch():
     d = load_database()
     r = d.run("20250513")
-    assert d.corrections().get("mass_constants", "legacy") == "legacy"
+    d.pipeline.setdefault("corrections", {})["mass_constants"] = "legacy"
     assert d.profile_for(r, "cbs") == r.legacy.profile("cbs")
     d.pipeline.setdefault("corrections", {})["mass_constants"] = "codata"
     assert d.profile_for(r, "cbs") == "corrected"
