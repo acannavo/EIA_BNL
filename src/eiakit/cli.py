@@ -607,6 +607,16 @@ def cmd_fit_import(args) -> int:
 
 
 def cmd_gui(args) -> int:
+    try:
+        import PySide6.QtCore  # noqa: F401
+    except ImportError as e:
+        print(f"ERROR: Qt (PySide6) does not load: {e}\n"
+              "Repair it in this environment (Windows: Qt 6.7.3, the version that works "
+              "with the Anaconda-based venv):\n"
+              '  pip install --force-reinstall --no-deps "PySide6==6.7.3" '
+              '"PySide6-Essentials==6.7.3" "PySide6-Addons==6.7.3" "shiboken6==6.7.3"\n'
+              "then: eiakit info   (Qt check must say ok)")
+        return 2
     from .gui.app import main as gui_main
     return gui_main()
 
