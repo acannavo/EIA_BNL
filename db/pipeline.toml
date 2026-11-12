@@ -22,6 +22,8 @@ max_u_clicks      = 30        # replay: search the U actually used within +/- th
 [peaks.new_runs]
 labels = { Nb = 92, Al = 26, H = 1, C = 12, O = 16 }
 z_max  = { 92 = 22, 26 = 13, 1 = 1, 12 = 8, 16 = 8 }   # C and O up to 8+ as in the 2026 ps run
+center_search_frac = 0.03   # window centre: strong lines sought within +/- this of the prediction
+center_max_dev     = 0.03   # a voltage's own centre factor used if within this of the run median
 
 [peaks.gui_masses]
 92 = 92.906

@@ -579,13 +579,16 @@ def fit_run(db, run, data_root, out_dir: Path, log=None) -> dict:
     L = run.eia.L_m
     lines = new_run_lines(db, run)
     wf = float(settings.get("window_frac", 0.02))
+    nr = settings.get("new_runs", {})
+    search = float(nr.get("center_search_frac", 0.03))     # where the strong lines are sought
+    tol = float(nr.get("center_max_dev", 0.03))            # per-voltage k accepted within
     avgs, ks = {}, {}
     for U, reps in sorted(files.items()):
         traces = {r: read_trace(p, fmt) for r, p in sorted(reps.items())}
         tof, y = average_repeats([traces[r] for r in sorted(traces)])
         avgs[U] = (traces, tof, y)
         t0s = [predicted_tof(m, z, U, L, run.eia, prof) for m, _, z in lines]
-        ks[U] = center_factor(tof, y, t0s, wf)
+        ks[U] = center_factor(tof, y, t0s, search)
     good = [k for k, n in ks.values() if np.isfinite(k)]
     k_run = float(np.median(good)) if good else 1.0
     (out_dir / "output").mkdir(parents=True, exist_ok=True)
@@ -593,7 +596,9 @@ def fit_run(db, run, data_root, out_dir: Path, log=None) -> dict:
     diag = []
     for U, (traces, tof, y) in avgs.items():
         k, n = ks[U]
-        k_used = k if np.isfinite(k) and abs(k / k_run - 1) < 0.01 else k_run
+        # per voltage (the offset can grow with U: 2026 ps run, -12..-15 clicks at high U);
+        # the run median for voltages with < 2 strong lines or an implausible k
+        k_used = k if np.isfinite(k) and abs(k / k_run - 1) < tol else k_run
         reps = sorted(traces)
         rows = []
         for m_amu, label, z in lines:
