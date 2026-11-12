@@ -17,6 +17,12 @@ max_u_clicks      = 30        # replay: search the U actually used within +/- th
 # Masses typed in the untitled28 GUI (amu), keyed by the mass label written in Output
 # (= int(typed mass)). Needed only to replay the legacy fits. 92 / 1 / 12 / 15 verified
 # bit-exact on 20250611 and 2026_1103; 26 (Al) not yet verified (no Al raw SEM tested).
+# New runs (no [legacy] block in runs.toml): species of spectra_species -> mass label
+# (the m column of the Output files) and highest z fitted (override per run: peaks_z_max)
+[peaks.new_runs]
+labels = { Nb = 92, Al = 26, H = 1, C = 12, O = 16 }
+z_max  = { 92 = 22, 26 = 13, 1 = 1, 12 = 6, 16 = 8 }
+
 [peaks.gui_masses]
 92 = 92.906
 26 = 26.98
@@ -75,3 +81,6 @@ zbar_mask_tol     = 0.05      # I4: invalid where the ions possibly dropped outs
 #     The stored CBS kT and V0 are rescaled by (M_new / M_old) (e_old / e_new): the CBS
 #     shape in time, the FWHM and the areas do not change.
 mass_constants = "codata"
+
+[report]
+zbar_from_study = "PRL_AlNb"   # z-bar fit window (e_min/e_max per target, lower_from_z) of runs in no study

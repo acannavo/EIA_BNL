@@ -38,7 +38,7 @@ def store_path(fits_root, run) -> Path:
 
 
 def _labels(run) -> tuple[dict, dict]:
-    num2lab = dict(run.legacy.cbs_components) if run.legacy else {}
+    num2lab = dict(run.cbs_names)
     lab2num = {v: k for k, v in num2lab.items()}
     return num2lab, lab2num
 

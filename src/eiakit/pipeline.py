@@ -189,6 +189,12 @@ def _audit_execute(db, run, ctx):
 # peaks --------------------------------------------------------------------------------
 
 def _peaks_params(db, run):
+    if run.is_new:
+        from .peaks import new_run_lines
+        prof = db.profile_for(run, "peaks")
+        return {"pipeline.peaks": db.pipeline["peaks"], "eia": _jsonable(run.eia),
+                "acquisition.sem": _jsonable(run.acquisition.sem),
+                "lines": new_run_lines(db, run), "constants": _jsonable(db.profile(prof))}
     leg = run.legacy
     return {"pipeline.peaks": db.pipeline["peaks"], "eia": _jsonable(run.eia),
             "acquisition.sem": _jsonable(run.acquisition.sem),
@@ -211,7 +217,10 @@ def _peaks_inputs(db, run, data_root, ins):
 def _peaks_execute(db, run, ctx):
     import pandas as pd
 
-    from .peaks import load_peak_state, replay_run
+    from .peaks import fit_run, load_peak_state, replay_run
+    if run.is_new:                     # no untitled28 results: fit every voltage
+        r = fit_run(db, run, ctx.data_root, ctx.out)
+        return "error" not in r, r
     res = replay_run(db, run, ctx.data_root, state=load_peak_state(db, run.key))
     pd.DataFrame(res["summary"]).to_csv(ctx.out / "replay_summary.csv", index=False)
     if res["rows"]:
@@ -225,7 +234,8 @@ def _peaks_execute(db, run, ctx):
 def _cal_params(db, run):
     return {"pipeline.calibration": db.pipeline["calibration"], "eia": _jsonable(run.eia),
             "fc": _jsonable(run.fc), "acquisition.fc": _jsonable(run.acquisition.fc),
-            "legacy.profile_calibration": run.legacy.profile_calibration,
+            "legacy.profile_calibration": (run.legacy.profile_calibration
+                                           if run.legacy else None),
             "peaks.gui_masses": db.pipeline["peaks"]["gui_masses"],
             "mass_labels": list(run.mass_labels)}
 
@@ -330,6 +340,13 @@ def _cbs_execute(db, run, ctx):
     root = default_fits_root()
     if root is not None and store_path(root, run).is_file():
         return _cbs_store_execute(db, run, ctx, ck)
+    if run.is_new:                     # nothing fitted yet: the CBS fitter starts from here
+        (ctx.out / "cbs_areas.csv").write_text("z,CBS\n", encoding="utf-8")
+        summ = {"status": "no CBS fit yet (eiakit gui: CBS fitter, Seed all z)",
+                "components": 0}
+        (ctx.out / "replay_summary.json").write_text(json.dumps(summ, indent=2),
+                                                      encoding="utf-8")
+        return True, summ
     r = replay_run_cbs(db, run, ctx.data_root, ck=ck)
     if r["status"] == "missing files":
         return False, {"error": f"missing files {r['files']}"}
@@ -366,13 +383,21 @@ def _report_params(db, run):
             "study": None if st is None else {"name": st.name,
                                               "zbar": _jsonable(st.zbar),
                                               "exclude": st.exclude.get(run.key, {})},
-            "cbs_components": {str(k): v for k, v in run.legacy.cbs_components.items()},
+            "zbar_default": None if st is not None or _default_zbar(db) is None
+            else _jsonable(_default_zbar(db)),
+            "cbs_components": {str(k): v for k, v in run.cbs_names.items()},
             "run": {"target": run.target, "label": run.label,
                     "laser": _jsonable(run.laser), "mass_labels": run.mass_labels}}
 
 
 def _report_inputs(db, run, data_root, ins):
     _cbs_inputs(db, run, data_root, ins)
+
+
+def _default_zbar(db):
+    """z-bar settings for a run in no study: those of [report] zbar_from_study."""
+    name = db.pipeline.get("report", {}).get("zbar_from_study")
+    return db.studies[name].zbar if name in db.studies else None
 
 
 def _report_execute(db, run, ctx):
@@ -388,7 +413,8 @@ def _report_execute(db, run, ctx):
     st = study_of(db, run)
     ds = load_dataset(db, run, ck, st)
     summ = summarize(ds)
-    a = analyze_zbar(ds, st.zbar, db.pipeline.get("analysis")) if st is not None else {
+    zset = st.zbar if st is not None else _default_zbar(db)
+    a = analyze_zbar(ds, zset, db.pipeline.get("analysis")) if zset is not None else {
         "zb": None, "fit": None}
     items = []
     meta = (f"{run.target}, laser {run.laser.energy_mJ} mJ, L_EIA = {run.eia.L_m} m, "
@@ -399,11 +425,16 @@ def _report_execute(db, run, ctx):
     items.append(rr.spectra_overview(ds))
     rm = run_model(db, run, ctx.data_root, ck)
     areas = None
-    if rm["status"] == "ok":
+    if rm["status"] == "ok" and rm.get("empty"):
+        items += [("h2", "CBS decomposition per charge state"),
+                  ("p", "No CBS fit yet for this run: eiakit gui → CBS fitter → Load, "
+                        "'Seed all z' proposes components from the peaks of every J_z(t); "
+                        "review, Fit, Save, then run the run again.")]
+    elif rm["status"] == "ok":
         items += [("h2", "CBS decomposition per charge state"),
                   ("p", "Stored legacy CBS parameters (kT, V0, A, windows) on the current "
                         "calibration. Shaded: fit windows. Toggle a component in the legend."),
-                  rr.cbs_panels(rm, run.legacy.cbs_components)]
+                  rr.cbs_panels(rm, run.cbs_names)]
         p = ctx.upstream_out["cbs"] / "cbs_areas.csv"
         if p.is_file():
             areas = pd.read_csv(p)
@@ -514,7 +545,7 @@ def stage_status(db, run, stage_name: str, data_root: Path, processed: Path,
                 bad.append(f"{name} modified")
     if bad:
         reasons.append("outputs changed outside the pipeline: " + ", ".join(bad[:3]))
-    for dep in stage.depends:
+    for dep in depends_of(stage.name, run):
         ds = stage_status(db, run, dep, data_root, processed, _cache)
         dman = ds["manifest"]
         if ds["state"] != "ok":
@@ -527,6 +558,15 @@ def stage_status(db, run, stage_name: str, data_root: Path, processed: Path,
     return st
 
 
+def depends_of(name: str, run) -> list[str]:
+    """Upstream stages of a stage for a run. New runs (no legacy results): the calibration
+    reads the peak fits of the peaks stage instead of the untitled28 Output files."""
+    deps = list(STAGES[name].depends)
+    if name == "calibration" and getattr(run, "is_new", False):
+        deps.insert(0, "peaks")
+    return deps
+
+
 # ---- run -------------------------------------------------------------------------------
 
 def run_stage(db, run, stage_name: str, data_root: Path, processed: Path,
@@ -537,7 +577,7 @@ def run_stage(db, run, stage_name: str, data_root: Path, processed: Path,
     prev = read_manifest(processed, run, stage)
     cur = _current(db, run, stage, data_root, (prev or {}).get("inputs"))
     upstream, up_out = {}, {}
-    for dep in stage.depends:
+    for dep in depends_of(stage.name, run):
         dman = read_manifest(processed, run, STAGES[dep])
         upstream[dep] = dman.get("run_id") if dman else None
         up_out[dep] = out_dir(processed, run, STAGES[dep])
@@ -576,7 +616,7 @@ def plan(db, runs, data_root, processed, stages=None, force=False):
             if name not in stages:
                 continue
             st = stage_status(db, run, name, data_root, processed, cache)
-            deps_rerun = any(d in will for d in STAGES[name].depends)
+            deps_rerun = any(d in will for d in depends_of(name, run))
             if force or st["state"] != "ok" or deps_rerun:
                 todo.append((run, name, st))
                 will.add(name)

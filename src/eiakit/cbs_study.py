@@ -41,7 +41,7 @@ def run_components(db, run, data_root, areas: pd.DataFrame | None = None,
     if areas is None:
         ap = _find_cbs_file(res, "CBS_areas", run.fit_file_labels, run.target)
         areas = parse_cbs_areas(ap).table if ap else pd.DataFrame(columns=["z", "CBS"])
-    names = run.legacy.cbs_components
+    names = run.cbs_names
     excl = (study.exclude.get(run.key, {}) if study is not None else {})
     a_idx = areas.set_index(["z", "CBS"]) if len(areas) else None
     rows = []

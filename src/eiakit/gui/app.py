@@ -498,6 +498,10 @@ class FitterTab(QWidget):
                   _btn("Add component", self.add),
                   _btn("Remove", self.remove),
                   _btn("Default window", self.default_window),
+                  _btn("Seed this z", self.seed_z,
+                       "replace the components of this z by ones proposed from the peaks of "
+                       "its J_z(t) (labelled by arrival time), then Fit each"),
+                  _btn("Seed all z", self.seed_all, "Seed every z that has no component yet"),
                   _btn("Save to store", self.save,
                        "fits/<run>/cbs_fit.json (previous version kept)")):
             row.addWidget(b)
@@ -704,6 +708,25 @@ class FitterTab(QWidget):
         if z is not None and i is not None:
             self.s.set_window(z, i, None, None)
             self._after()
+
+    def seed_z(self):
+        z = self.z()
+        if z is None:
+            return
+        if self.s.comps.get(z) and QMessageBox.question(
+                self, "Seed", f"Replace the {len(self.s.comps[z])} components of z = {z}?") \
+                != QMessageBox.Yes:
+            return
+        self.s.seed(z)
+        self._after()
+
+    def seed_all(self):
+        if self.s is None:
+            return
+        r = self.s.seed_all()
+        self.win.log.appendPlainText(f"seeded {len(r)} charge states: " + ", ".join(
+            f"z{z} {'+'.join(v) or '-'}" for z, v in r.items()))
+        self._after()
 
     def save(self):
         if self.s is None:

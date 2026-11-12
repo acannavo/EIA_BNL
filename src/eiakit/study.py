@@ -205,12 +205,12 @@ def reconstruction(db, study_name, data_root, processed, studies_root, source="p
         if rm["status"] != "ok":
             raise RuntimeError(f"{run.key}: {rm}")
         title = f"{run.target}, {run.laser.energy_mJ:g} mJ"
-        cols.append((title, rm, run.legacy.cbs_components, list(pnl.z)))
+        cols.append((title, rm, run.cbs_names, list(pnl.z)))
         for z in pnl.z:
             for c in rm["components"].get(z, []):
                 if c.active:
                     rows.append({"run": run.key, "z": z, "cbs_file": c.extra.get("cbs"),
-                                 "component": run.legacy.cbs_components.get(c.extra.get("cbs")),
+                                 "component": run.cbs_names.get(c.extra.get("cbs")),
                                  "kT_eV": c.kT, "V0_V": c.V0, "A": c.A,
                                  "win_left_us": c.win_left, "win_right_us": c.win_right})
     tab = pd.DataFrame(rows)

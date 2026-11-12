@@ -216,30 +216,31 @@ def study_sensitivity(db, st, dsets, data_root) -> dict:
                 rows.append({"quantity": f"zbar {q}", "dataset": ds.name, "perturbation": name,
                              "base": b0[q], "value": f[q], "rel": f[q] / b0[q] - 1})
     cs = st.collapse
-    prof = {k: db.profile_for(db.run(k), "analysis") for k in st.runs}
-    masses = {k: db.mass_kg(db.run(k).target, prof[k]) for k in st.runs}
-    e_C = db.e_C(prof[st.runs[0]])
-    pk = pd.concat([C.cbs_peaks(db, db.run(k), data_root, cs.cbs_t_source) for k in st.runs],
-                   ignore_index=True)
-    pk = C.drop_excluded(pk, st.exclude)
+    if cs is not None:                  # z* only for studies with a [collapse] section
+        prof = {k: db.profile_for(db.run(k), "analysis") for k in st.runs}
+        masses = {k: db.mass_kg(db.run(k).target, prof[k]) for k in st.runs}
+        e_C = db.e_C(prof[st.runs[0]])
+        pk = pd.concat([C.cbs_peaks(db, db.run(k), data_root, cs.cbs_t_source) for k in st.runs],
+                       ignore_index=True)
+        pk = C.drop_excluded(pk, st.exclude)
 
-    def zstars(p):
-        ser = C.collapse_series(p, cs.runs, masses, e_C, cs.min_fast_points)
-        out = {s["run"]: s["zstar"] for s in ser}
-        j = C.weighted_joint([s["zstar"] for s in ser], [s["se_zstar"] for s in ser])
-        out["joint"] = j["zstar"]
-        return out
-    z0 = zstars(pk)
-    for name, dl, dt in PERTURB:
-        p2 = pk.copy()
-        for c in ("t_before", "t_peak", "t_after"):
-            p2[c] = p2[c] - dt
-        p2["distance_m"] = p2.distance_m * (1 + dl)
-        z1 = zstars(p2)
-        for k, v in z0.items():
-            rows.append({"quantity": "z* (CBS)", "dataset": k, "perturbation": name,
-                         "base": v, "value": z1.get(k, np.nan),
-                         "rel": z1.get(k, np.nan) / v - 1})
+        def zstars(p):
+            ser = C.collapse_series(p, cs.runs, masses, e_C, cs.min_fast_points)
+            out = {s["run"]: s["zstar"] for s in ser}
+            j = C.weighted_joint([s["zstar"] for s in ser], [s["se_zstar"] for s in ser])
+            out["joint"] = j["zstar"]
+            return out
+        z0 = zstars(pk)
+        for name, dl, dt in PERTURB:
+            p2 = pk.copy()
+            for c in ("t_before", "t_peak", "t_after"):
+                p2[c] = p2[c] - dt
+            p2["distance_m"] = p2.distance_m * (1 + dl)
+            z1 = zstars(p2)
+            for k, v in z0.items():
+                rows.append({"quantity": "z* (CBS)", "dataset": k, "perturbation": name,
+                             "base": v, "value": z1.get(k, np.nan),
+                             "rel": z1.get(k, np.nan) / v - 1})
     tab = pd.DataFrame(rows)
     f = Figure(rows=1, cols=3, size_in=(16, 4.8), legend="figure", letters=True,
                title=lab("Sensitivity to the flight length and the time zero",

@@ -272,9 +272,18 @@ def prepare_rows(db, run, data_root) -> dict:
 
     pipe = db.pipeline["calibration"]
     sem = run.folder(data_root) / run.acquisition.sem.folder
-    rows = read_output_folder(sem / "Output")
+    out = sem / "Output"
+    if getattr(run, "is_new", False):
+        # new run: the peak fits of the peaks stage (processed/<run>/10_peaks/output)
+        from .paths import PathsNotConfigured, get_paths
+        try:
+            out = get_paths().processed / run.key / "10_peaks" / "output"
+        except PathsNotConfigured:
+            return {"error": "new run: the processed root is not configured"}
+    rows = read_output_folder(out)
     if rows.empty:
-        return {"error": f"no peak table in {sem / 'Output'}"}
+        return {"error": f"no peak table in {out}" + (" (run the peaks stage first)"
+                                                     if getattr(run, "is_new", False) else "")}
     n_rows_file, n1 = len(rows), []
     # Step 9: voltages refitted in the peak picker replace their Output rows
     from .cbs_store import default_fits_root

@@ -41,6 +41,12 @@ Command line entry point:  ``eiakit <command>``
                                     method studies (Step 12) -> studies/<NAME>/methods/:
                                     zbar (I4/I5), calibration (I2), sensitivity (LOF, t0),
                                     fc (start/stop drift), shots (N12 bootstrap)
+    eiakit add-run FOLDER --target T --energy MJ [--like KEY] [--label L]
+                                    new dataset: append the run (raw files only, no legacy
+                                    results) to db/runs.toml; then eiakit run FOLDER
+    eiakit cbs-seed [KEY ...] [--replace] [--no-fit]
+                                    propose CBS components from the peaks of every J_z(t)
+                                    (labelled by arrival time) and save them to the store
     eiakit fit-import [KEY ...] [--force]
                                     start the CBS fit store (fits/<KEY>/cbs_fit.json) from the
                                     legacy CBS_fit_results file; the fitter edits the store
@@ -514,7 +520,12 @@ def cmd_study(args) -> int:
                 print(f"   - {r}")
         return 0
     fmts = () if args.html_only else ("pdf", "png")
+    st = db.study(args.name)
     for part in parts:
+        if (part == "reconstruction" and not st.reconstruction.panels) or \
+                (part == "collapse" and st.collapse is None):
+            print(f"{args.name} / {part}: skipped (no [{part}] section in the study file)")
+            continue
         print(f"{args.name} / {part} (source: {args.source})")
         res = getattr(S, part)(db, args.name, paths.data, paths.processed, paths.studies,
                                source=args.source, formats=fmts)
@@ -604,6 +615,75 @@ def cmd_fit_import(args) -> int:
             print(f"{run.key}: {e}")
             rc = 1
     return rc
+
+
+def cmd_cbs_seed(args) -> int:
+    """Seed the CBS components of a run from the peaks of every J_z(t); save to the store."""
+    from .cbs_edit import CBSSession
+    db = _load_db()
+    paths = get_paths()
+    rc = 0
+    for run in _select_runs(db, args.keys):
+        try:
+            s = CBSSession.load(db, run, paths.data, paths.processed)
+        except FileNotFoundError as e:
+            print(f"{run.key}: {e} (run 'eiakit run {run.key}' first)")
+            rc = 1
+            continue
+        r = s.seed_all(only_empty=not args.replace, fit=not args.no_fit)
+        if not r:
+            print(f"{run.key}: nothing to seed (every z has components; --replace to redo)")
+            continue
+        p = s.save(paths.fits, note="eiakit cbs-seed")
+        print(f"{run.key}: seeded {len(r)} z: " + ", ".join(
+            f"z{z} {'+'.join(v) or '-'}" for z, v in r.items()) + f"\n  -> {p}")
+    return rc
+
+
+def cmd_add_run(args) -> int:
+    """Append a run of a new dataset (raw files only) to db/runs.toml."""
+    import datetime as _dt
+    import re as _re
+    db = _load_db()
+    paths = get_paths()
+    key = args.folder
+    if key in db._runs:
+        print(f"ERROR: run {key!r} is already in runs.toml")
+        return 2
+    if not (paths.data / key).is_dir():
+        print(f"ERROR: no folder {paths.data / key}: copy the run folder there first")
+        return 2
+    like = db.run(args.like) if args.like else None
+    tgt = args.target
+    if tgt not in db.species:
+        print(f"ERROR: unknown target {tgt!r}; known: {sorted(db.species)}")
+        return 2
+    m = _re.match(r"(\d{4})(\d{2})(\d{2})", key)
+    date = args.date or (f"{m[1]}-{m[2]}-{m[3]}" if m else _dt.date.today().isoformat())
+    labels = like.mass_labels if like and like.target == tgt else \
+        db.species[tgt].data_labels[:1]
+    species = like.spectra_species if like else [tgt, "H", "C", "O"]
+    rec = like.rec if like else None
+    block = f"""
+[runs."{key}"]
+include         = true
+target          = "{tgt}"
+label           = "{args.label or f'{tgt}, {args.energy:g} mJ'}"
+date            = {date}
+laser           = {{ energy_mJ = {args.energy} }}
+eia             = "{rec.eia if rec else 'EIA_2025'}"
+fc              = "{rec.fc if rec else 'FC_2025'}"
+acquisition     = "{rec.acquisition if rec else 'scope_2025'}"
+mass_labels     = {list(labels)}
+spectra_species = {list(species)}
+notes           = "new dataset, added with eiakit add-run{f' (like {args.like})' if like else ''}"
+""".replace("'", '"')
+    p = db.root / "runs.toml"
+    with open(p, "a", encoding="utf-8") as fh:
+        fh.write(block)
+    print(f"added to {p}:{block}")
+    print(f"next: eiakit db-check; eiakit files {key}; eiakit run {key}")
+    return 0
 
 
 def cmd_gui(args) -> int:
@@ -759,6 +839,20 @@ def main(argv=None) -> int:
     p.add_argument("--force", action="store_true",
                    help="write the changelog entry even if nothing changed")
     p.set_defaults(func=cmd_diff)
+    p = sub.add_parser("add-run", help="add a new run folder (raw files only) to runs.toml")
+    p.add_argument("folder", help="folder name in the data root (= the run key)")
+    p.add_argument("--target", required=True, help="Nb, Al, ...")
+    p.add_argument("--energy", type=float, required=True, help="laser energy [mJ]")
+    p.add_argument("--like", help="copy instruments / acquisition / species of this run "
+                                  "(e.g. 20250611)")
+    p.add_argument("--label")
+    p.add_argument("--date", help="YYYY-MM-DD (default: from the folder name)")
+    p.set_defaults(func=cmd_add_run)
+    p = sub.add_parser("cbs-seed", help="propose CBS components from the J_z(t) peaks")
+    p.add_argument("keys", nargs="*")
+    p.add_argument("--replace", action="store_true", help="also z that have components")
+    p.add_argument("--no-fit", action="store_true", help="seed only, no kT scan")
+    p.set_defaults(func=cmd_cbs_seed)
     p = sub.add_parser("fit-import", help="start the CBS fit store from the legacy fit files")
     p.add_argument("keys", nargs="*")
     p.add_argument("--force", action="store_true", help="replace an existing store")

@@ -81,7 +81,7 @@ def cbs_peaks(db, run, data_root, t_source: str = "exp") -> pd.DataFrame:
 
     fit = load_fit(db, run, data_root, default_fits_root())
     L = fit.header.L_EIA_m or run.eia.L_m
-    names = run.legacy.cbs_components
+    names = run.cbs_names
     rows = []
     for c in fit.components:
         comp = names.get(c.cbs)

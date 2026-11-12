@@ -57,7 +57,7 @@ def paper_numbers(db, study_name, data_root, processed, source="pipeline") -> pd
         rm = run_model(db, run, data_root, cks[key])
         if rm["status"] != "ok":
             continue
-        names = run.legacy.cbs_components
+        names = run.cbs_names
         mo = rm["model"]
         for z, cs in rm["components"].items():
             act = [c for c in cs if c.active]

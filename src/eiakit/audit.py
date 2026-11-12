@@ -281,7 +281,7 @@ def _audit_cbs(rep: Report, fit, areas, ck, run, db):
                 "(the fitter always writes 1..n)", edited)
 
     # physical labels and ordering in time
-    comp_map = run.legacy.cbs_components
+    comp_map = run.cbs_names
     tab = fit.table.copy()
     tab["component"] = tab.CBS.map(comp_map)
     bad_order = []
@@ -400,6 +400,40 @@ def _audit_cbs(rep: Report, fit, areas, ck, run, db):
 
 # ================================================================ main entry
 
+def _audit_raw(rep, db, run, folder: Path):
+    """New run (no [legacy] block): inventory of the raw files the pipeline will use."""
+    from collections import Counter
+
+    from .acquisition import scan_folder
+    from .calibration import fc_dirs
+    rep.add("info", "NEW", "new run: no legacy results; peaks, calibration and CBS are "
+            "made from the raw files (peaks stage: every voltage fitted)")
+    fmt = run.acquisition.sem
+    sc = scan_folder(folder / fmt.folder, fmt) if (folder / fmt.folder).is_dir() else None
+    shots = Counter(u for _, u, _ in (sc.matched if sc else []) if u is not None)
+    if not shots:
+        rep.add("error", "SEM", f"no raw SEM files in {folder / fmt.folder} "
+                f"(acquisition {run.rec.acquisition})")
+    else:
+        Us = sorted(shots)
+        rep.facts["sem"] = {"voltages": len(Us), "U_min": Us[0], "U_max": Us[-1],
+                            "shots_per_voltage": dict(Counter(shots.values()))}
+        rep.add("info", "SEM", f"{len(Us)} voltages {Us[0]:g} .. {Us[-1]:g} V, shots per "
+                f"voltage {dict(sorted(Counter(shots.values()).items()))}")
+        one = [u for u in Us if shots[u] < 2]
+        if one:
+            rep.add("warn", "SEM1", f"{len(one)} voltages with a single shot (no shot "
+                    f"scatter): {', '.join(f'{u:g}' for u in one[:10])}")
+    if sc is not None and sc.unmatched:
+        rep.add("warn", "SEMX", f"{len(sc.unmatched)} files in {fmt.folder} do not match "
+                "the file pattern", [p.name for p in sc.unmatched[:10]])
+    for src in ("start", "stop"):
+        n = sum(len(scan_folder(folder / d, run.acquisition.fc).matched)
+                for d in fc_dirs(run, src) if d and (folder / d).is_dir())
+        rep.add("info" if n or src == "stop" else "error", f"FC_{src.upper()}",
+                f"FC {src}: {n} traces")
+
+
 def audit_run(db, run, data_root: Path, study=None) -> Report:
     folder = run.folder(data_root)
     rep = Report(run.key, run.label)
@@ -412,6 +446,9 @@ def audit_run(db, run, data_root: Path, study=None) -> Report:
                             "extra": sorted(str(p.relative_to(folder)) for p in rf.extras)}
     sem = folder / "2_SEM"
     res = folder / "EIA-Results"
+    if getattr(run, "is_new", False):
+        _audit_raw(rep, db, run, folder)
+        return rep
 
     out = read_output_folder(sem / "Output") if (sem / "Output").is_dir() else pd.DataFrame()
     det = read_output_detail_folder(sem / "Output_detail") if (sem / "Output_detail").is_dir() \

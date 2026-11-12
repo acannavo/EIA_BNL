@@ -466,9 +466,21 @@ def run_model(db, run, data_root, ck: dict | None = None, use_store: bool = True
     area_p = None if store is not None else \
         _find_cbs_file(res, "CBS_areas", run.fit_file_labels, run.target)
     ck_p = res / "pipeline_checkpoint.npy"
-    if fit_p is None or (ck is None and not ck_p.is_file()):
+    empty = fit_p is None and getattr(run, "is_new", False) and ck is not None
+    if (fit_p is None and not empty) or (ck is None and not ck_p.is_file()):
         return {"status": "missing files", "files": {"fit": fit_p, "checkpoint": ck_p}}
-    fit = store if store is not None else parse_cbs_fit_results(fit_p)
+    if empty:                 # new run, nothing fitted yet: no components (CBS fitter)
+        import pandas as pd
+
+        from .cbs_store import TABLE_COLS, StoreHeader
+        from .legacy import CBSFitFile
+        p0 = db.profile_for(run, "cbs")
+        fit = CBSFitFile(path=None, header=StoreHeader(
+            generated=None, L_EIA_m=run.eia.L_m, M_ION_kg=db.mass_kg(run.target, p0),
+            signal="per_ion", e_C=db.e_C(p0)), z_totals={}, components=[],
+            table=pd.DataFrame(columns=["z", "CBS", *TABLE_COLS]))
+    else:
+        fit = store if store is not None else parse_cbs_fit_results(fit_p)
     areas = parse_cbs_areas(area_p) if area_p else None
     if ck is None:
         ck = load_checkpoint(ck_p)
@@ -484,7 +496,7 @@ def run_model(db, run, data_root, ck: dict | None = None, use_store: bool = True
     # the stored kT, V0 belong to the fit's constants (legacy profile; M_ION in the
     # header); the shape depends on kT e / M and V0 e / M only, so another mass unit or
     # charge rescales them and leaves times, FWHM and areas unchanged (I1)
-    leg = run.legacy.profile_cbs
+    leg = run.legacy.profile_cbs if run.legacy else prof
     m_old = fit.header.M_ION_kg or db.mass_kg(run.target, leg)
     e_old = getattr(fit.header, "e_C", None) or db.e_C(leg)
     s = (m_kg / m_old) * (e_old / e_C)
@@ -498,7 +510,7 @@ def run_model(db, run, data_root, ck: dict | None = None, use_store: bool = True
     return {"status": "ok", "model": model, "curves": curves, "exp": exp, "fit": fit,
             "areas": areas, "components": comps, "profile": prof, "param_scale": s,
             "per_ion": per_ion, "fit_path": fit_p, "areas_path": area_p, "ck_path": ck_p,
-            "from_store": store is not None}
+            "from_store": store is not None, "empty": empty}
 
 
 def replay_run_cbs(db, run, data_root, ck: dict | None = None) -> dict:

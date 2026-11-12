@@ -508,3 +508,121 @@ def update_peak_state(db, key: str, summary: list[dict]) -> tuple[Path, int]:
         lines.append("")
     p.write_text("\n".join(lines), encoding="utf-8")
     return p, n
+
+
+# ======================================================================== new runs
+# Runs without legacy results: every voltage fitted from the raw SEM shots.
+
+def new_run_lines(db, run) -> list[tuple[float, int, int]]:
+    """(m_amu, mass label, z) of every species of the run (spectra_species), z = 1..z_max
+    ([peaks.new_runs] of pipeline.toml, overridden by the run's peaks_z_max)."""
+    cfg = db.pipeline["peaks"].get("new_runs", {})
+    labels = {k: int(v) for k, v in cfg.get("labels", {}).items()}
+    zmax = {int(k): int(v) for k, v in cfg.get("z_max", {}).items()}
+    zmax.update({int(k): int(v) for k, v in (run.peaks_z_max or {}).items()})
+    masses = {int(k): float(v) for k, v in db.pipeline["peaks"]["gui_masses"].items()}
+    out = []
+    for sp in run.spectra_species:
+        lab = labels.get(sp)
+        if lab is None or lab not in masses:
+            raise KeyError(f"{run.key}: species {sp!r} has no mass label / mass in "
+                           "[peaks.new_runs] labels and [peaks.gui_masses]")
+        out += [(masses[lab], lab, z) for z in range(1, zmax.get(lab, 1) + 1)]
+    return out
+
+
+def center_factor(tof, y, t0s, window_frac: float, strong_frac: float = 0.2,
+                  smooth: int = 5) -> tuple[float, int]:
+    """Factor k = found / predicted TOF of the strongest lines of one voltage (the
+    predicted lines are a little early, N16): the deepest point of the smoothed signal in
+    each +/- window_frac window; median over the lines deeper than strong_frac x the
+    deepest. Returns (k, lines used); k = nan when fewer than 2 lines qualify."""
+    ys = np.convolve(y, np.ones(smooth) / smooth, mode="same")
+    base = float(np.median(ys))
+    found = []
+    for t0 in t0s:
+        m = (tof >= t0 * (1 - window_frac)) & (tof <= t0 * (1 + window_frac))
+        if m.sum() < 3:
+            continue
+        j = int(np.argmin(ys[m]))
+        found.append((base - float(ys[m][j]), float(tof[m][j]) / t0))
+    if not found:
+        return float("nan"), 0
+    depth = np.array([d for d, _ in found])
+    ratio = np.array([r for _, r in found])
+    strong = depth > strong_frac * depth.max()
+    if strong.sum() < 2:
+        return float("nan"), int(strong.sum())
+    return float(np.median(ratio[strong])), int(strong.sum())
+
+
+def fit_run(db, run, data_root, out_dir: Path, log=None) -> dict:
+    """
+    Peak stage of a new run: for every voltage with raw SEM files, the shots averaged on
+    the grid of the longest one, every line of new_run_lines fitted at the file voltage,
+    with the window centre corrected by center_factor (per voltage; the run median when a
+    voltage has fewer than 2 strong lines). Writes, in the untitled28 formats,
+    out_dir/output/p<U>.txt (m, z, TOF, Yield) and out_dir/output_detail/p<U>.txt
+    (+ YieldAveFit, YieldAve, YieldSTDV, Yield1..n), and out_dir/fits.csv (diagnostics).
+    """
+    from .acquisition import read_trace, scan_folder
+    fmt = run.acquisition.sem
+    sem = run.folder(data_root) / fmt.folder
+    files: dict[float, dict[int, Path]] = {}
+    for p, U, rep in scan_folder(sem, fmt).matched:
+        if U is not None:
+            files.setdefault(U, {})[rep] = p
+    if not files:
+        return {"error": f"no raw SEM files in {sem}"}
+    settings = dict(db.pipeline["peaks"])
+    prof = db.profile(db.profile_for(run, "peaks"))
+    L = run.eia.L_m
+    lines = new_run_lines(db, run)
+    wf = float(settings.get("window_frac", 0.02))
+    avgs, ks = {}, {}
+    for U, reps in sorted(files.items()):
+        traces = {r: read_trace(p, fmt) for r, p in sorted(reps.items())}
+        tof, y = average_repeats([traces[r] for r in sorted(traces)])
+        avgs[U] = (traces, tof, y)
+        t0s = [predicted_tof(m, z, U, L, run.eia, prof) for m, _, z in lines]
+        ks[U] = center_factor(tof, y, t0s, wf)
+    good = [k for k, n in ks.values() if np.isfinite(k)]
+    k_run = float(np.median(good)) if good else 1.0
+    (out_dir / "output").mkdir(parents=True, exist_ok=True)
+    (out_dir / "output_detail").mkdir(parents=True, exist_ok=True)
+    diag = []
+    for U, (traces, tof, y) in avgs.items():
+        k, n = ks[U]
+        k_used = k if np.isfinite(k) and abs(k / k_run - 1) < 0.01 else k_run
+        reps = sorted(traces)
+        rows = []
+        for m_amu, label, z in lines:
+            t0 = predicted_tof(m_amu, z, U, L, run.eia, prof) * k_used
+            f = fit_peak(tof, y, t0, 0.0, wf, settings.get("mu_bound_s", 150e-9),
+                         settings.get("min_points", 4))
+            r = {"U": U, "m": label, "z": z, "t0": t0, "k": k_used, "TOF": f["mu"],
+                 "Yield": f["A"], "sigma": f["sigma"], "B": f["B"], "success": f["success"],
+                 "mu_at_bound": f["mu_at_bound"], "A_at_bound": f["A_at_bound"]}
+            if f["success"]:
+                vals = [float(np.interp(f["mu"], *traces[q])) for q in reps]
+                r.update(YieldAveFit=f["A"], YieldAve=float(np.mean(vals)),
+                         YieldSTDV=float(np.std(vals)),
+                         **{f"Yield{i + 1}": v for i, v in enumerate(vals)})
+            rows.append(r)
+        df = pd.DataFrame(rows)
+        diag.append(df)
+        ok = df[df.success]
+        name = f"p{U:g}.txt" if float(U) != int(U) else f"p{int(U)}.txt"
+        ok[["m", "z", "TOF", "Yield"]].to_csv(out_dir / "output" / name, index=False)
+        shot_cols = [c for c in ok.columns if c.startswith("Yield") and c[5:].isdigit()]
+        ok[["m", "z", "TOF", "YieldAveFit", "YieldAve", "YieldSTDV", *shot_cols]].to_csv(
+            out_dir / "output_detail" / name, index=False)
+        if log:
+            log(f"  U = {U:g} V: {len(ok)}/{len(df)} lines, k = {k_used:.4f}"
+                f"{'' if k_used == k else ' (run median)'}")
+    allf = pd.concat(diag, ignore_index=True)
+    allf.to_csv(out_dir / "fits.csv", index=False)
+    return {"voltages": len(avgs), "lines_fitted": int(allf.success.sum()),
+            "lines_total": len(allf), "k_run": k_run,
+            "k_from_strong_lines": int(sum(np.isfinite(k) for k, _ in ks.values())),
+            "mu_at_bound": int((allf.success & allf.mu_at_bound).sum())}

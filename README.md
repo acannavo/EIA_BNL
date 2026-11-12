@@ -67,6 +67,29 @@ Folders whose name is a canonical name plus `~`, `_`, `_0`, `_b`, ... (for examp
 results and are ignored. Other folders (`Miscellaneous`, `LowStateCharge`,
 `4_MultiShotSameSpot`, ...) are listed but not used.
 
+### A new dataset (raw files only)
+
+1. Copy each run folder into the data root, with the same layout as the 2025 runs:
+   `NewEIASoftware\data\<FOLDER>\1_FC_Start`, `2_SEM` (the `<U>v<shot>.csv` files),
+   `3_FC_Stop`. The folder name becomes the run key (e.g. `20251120`).
+2. `eiakit add-run <FOLDER> --target Nb --energy 370 --like 20250611` appends the run to
+   `db\runs.toml` (same instruments, file formats and species as `--like`; no `[legacy]`
+   block, so it is a *new* run). Check: `eiakit db-check`, `eiakit files <FOLDER>`.
+3. `eiakit run <FOLDER>`:
+   - audit: inventory of the raw files (voltages, shots per voltage, FC traces);
+   - peaks: every voltage fitted from the raw shots (all z of `spectra_species` up to
+     `[peaks.new_runs] z_max`; window centre corrected automatically from the strongest
+     lines) -> `processed\<FOLDER>\10_peaks\output\p<U>.txt` (untitled28 format);
+   - calibration from those fits and the FC traces (pre-trigger pedestal);
+   - cbs: empty until you fit; report: spectra, z̄ fit (window of `[report]
+     zbar_from_study` until the run is in a study).
+4. CBS: `eiakit cbs-seed <FOLDER>` (or the CBS fitter: *Seed all z*) proposes components
+   from the peaks of every J_z(t), labelled by arrival time, and fits them; review z by z
+   in the fitter, Save, `eiakit run <FOLDER>`.
+5. Compare the conditions: a study file `db\studies\<NAME>.toml` with at least
+   `name`, `runs`, `rows` (targets), `column_energy_mJ` and a `[zbar]` window; then
+   `eiakit study <NAME>`, `eiakit methods <NAME>`, `eiakit snapshot`.
+
 ### The eiakit window (`eiakit gui`)
 
 | tab | what it does |

@@ -149,15 +149,24 @@ class RunRecord(_Model):
     notes: str = ""
     legacy: LegacyInfo | None = None
 
+    # new runs (no [legacy] block): highest z fitted per mass label, overriding
+    # [peaks.new_runs] z_max of pipeline.toml, e.g. { 92 = 25 }
+    peaks_z_max: dict[int, int] = {}
+
     @model_validator(mode="after")
     def _complete_if_included(self):
         if self.include:
-            missing = [k for k in ("target", "eia", "fc", "acquisition", "legacy")
+            missing = [k for k in ("target", "eia", "fc", "acquisition")
                        if getattr(self, k) is None]
-            missing += [k for k in ("mass_labels", "fit_file_labels") if not getattr(self, k)]
+            missing += [k for k in ("mass_labels",) if not getattr(self, k)]
+            if self.legacy is not None and not self.fit_file_labels:
+                missing.append("fit_file_labels (runs with a [legacy] block)")
             if missing:
                 raise ValueError(f"included run lacks {missing}")
         return self
+
+
+DEFAULT_CBS_NAMES = {1: "fast", 2: "slow", 3: "ultra_fast", 4: "component_4"}
 
 
 class Run:
@@ -165,6 +174,18 @@ class Run:
 
     def __init__(self, key: str, rec: RunRecord, db: Database):
         self.key, self.rec, self._db = key, rec, db
+
+    @property
+    def is_new(self) -> bool:
+        """No [legacy] block: analysed from the raw files only (no untitled27/28 or CBS
+        fitter results to replay)."""
+        return self.rec.legacy is None
+
+    @property
+    def cbs_names(self) -> dict[int, str]:
+        """CBS number -> physical label: the legacy REMAP, or the default for new runs."""
+        return dict(self.rec.legacy.cbs_components) if self.rec.legacy else \
+            dict(DEFAULT_CBS_NAMES)
 
     def __getattr__(self, name):          # record fields: run.label, run.target, ...
         return getattr(self.rec, name)
@@ -356,7 +377,7 @@ class Database:
                     _ = self.run(key).acquisition
                 except ValueError as exc:
                     err.append(f"{where}: acquisition_overrides invalid: {exc}")
-            for st in STAGES:
+            for st in STAGES if r.legacy else []:
                 if r.legacy.profile(st) not in prof:
                     err.append(f"{where}: legacy profile_{st} {r.legacy.profile(st)!r} not defined")
             bad = [m for m in r.mass_labels if m not in self.species[r.target].data_labels]

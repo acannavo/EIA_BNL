@@ -54,12 +54,13 @@ class CBSSession:
         rm = run_model(db, run, data_root, ck)
         if rm["status"] != "ok":
             raise FileNotFoundError(f"{run.key}: {rm['status']} {rm.get('files')}")
-        names = run.legacy.cbs_components if run.legacy else {}
+        names = run.cbs_names
         comps = copy.deepcopy(rm["components"])
         for cs in comps.values():
             for c in cs:
                 c.extra["label"] = names.get(c.extra.get("cbs"), f"component_{c.extra.get('cbs')}")
-        src = ("store " if rm.get("from_store") else "legacy ") + str(rm["fit_path"])
+        src = ("new run, no CBS fit yet: Seed / Add components" if rm.get("empty") else
+               ("store " if rm.get("from_store") else "legacy ") + str(rm["fit_path"]))
         return cls(db, run, rm["model"], rm["curves"], rm["exp"], comps, src)
 
     # ---------------------------------------------------------------- views
@@ -189,6 +190,63 @@ class CBSSession:
         del self.comps[z][i]
         self.dirty.add(z)
 
+    # ---------------------------------------------------------------- seed
+    def seed(self, z, max_components: int = 3, prominence_frac: float = 0.1,
+             fit: bool = True) -> list[str]:
+        """Propose components for z from the peaks of its J_z(t) (new runs, or a fresh start):
+        peaks of the smoothed curve with a prominence above prominence_frac x its maximum,
+        the strongest max_components, labelled by arrival time (1 peak: slow; 2: fast,
+        slow; 3: ultra_fast, fast, slow); FWHM from the peak width, kT from the FWHM, V0
+        from u = L / t, A analytic, then Fit of each (kT scan). Replaces the components of z.
+        Returns the labels."""
+        from scipy.signal import find_peaks, peak_widths
+        if z not in self.curves:
+            return []
+        y = np.asarray(self.curves[z], float)
+        t = self.t_us()
+        if not np.any(y > 0):
+            self.comps[z] = []
+            self.dirty.add(z)
+            return []
+        w = max(3, len(y) // 2000)
+        ys = np.convolve(y, np.ones(w) / w, mode="same")
+        pk, pr = find_peaks(ys, prominence=prominence_frac * ys.max())
+        if not len(pk):
+            pk = np.array([int(np.argmax(ys))])
+            pr = {"prominences": np.array([ys.max()])}
+        keep = np.argsort(pr["prominences"])[::-1][:max_components]
+        pk = np.sort(pk[keep])
+        widths = peak_widths(ys, pk, rel_height=0.5)[0]
+        dt = float(np.median(np.diff(t)))
+        names = {1: ["slow"], 2: ["fast", "slow"], 3: ["ultra_fast", "fast", "slow"]}
+        labels = names.get(len(pk), LABEL_ORDER[:len(pk)])
+        self.comps[z] = []
+        for j, lab in zip(pk, labels, strict=True):
+            fw = max(float(widths[list(pk).index(j)]) * dt, 3 * dt)
+            i = self.add(z, lab, float(t[j]), fw)
+            c = self.comps[z][i]
+            c.t_left, c.t_right = float(t[j]) - fw / 2, float(t[j]) + fw / 2
+        if fit:
+            for i in range(len(self.comps[z])):
+                try:
+                    self.fit(z, i)
+                except Exception:                      # noqa: BLE001 - keep the seed
+                    pass
+        self.dirty.add(z)
+        return labels
+
+    def seed_all(self, only_empty: bool = True, min_frac: float = 1e-3, **kw) -> dict:
+        """seed() for every z with signal above min_frac of the strongest z (default: only
+        the z without components). Returns {z: labels}."""
+        peak = max((float(np.nanmax(v)) for v in self.curves.values()), default=0.0)
+        out = {}
+        for z in self.zs:
+            if only_empty and self.comps.get(z):
+                continue
+            if z in self.curves and float(np.nanmax(self.curves[z])) >= min_frac * peak:
+                out[z] = self.seed(z, **kw)
+        return out
+
     # ---------------------------------------------------------------- save
     def _triplet(self, z, t_fit):
         te, ye = self.exp.get(z, (np.array([]), np.array([])))
@@ -203,7 +261,7 @@ class CBSSession:
         return out
 
     def to_fit_file(self) -> CBSFitFile:
-        names = self.run.legacy.cbs_components if self.run.legacy else {}
+        names = self.run.cbs_names
         lab2num = {v: k for k, v in names.items()}
         nxt = max(lab2num.values(), default=0) + 1
         rows, blocks = [], []
