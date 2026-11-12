@@ -21,7 +21,7 @@ max_u_clicks      = 30        # replay: search the U actually used within +/- th
 # (the m column of the Output files) and highest z fitted (override per run: peaks_z_max)
 [peaks.new_runs]
 labels = { Nb = 92, Al = 26, H = 1, C = 12, O = 16 }
-z_max  = { 92 = 22, 26 = 13, 1 = 1, 12 = 6, 16 = 8 }
+z_max  = { 92 = 22, 26 = 13, 1 = 1, 12 = 8, 16 = 8 }   # C and O up to 8+ as in the 2026 ps run
 
 [peaks.gui_masses]
 92 = 92.906

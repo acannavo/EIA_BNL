@@ -640,6 +640,14 @@ def cmd_cbs_seed(args) -> int:
     return rc
 
 
+def _toml_val(v):
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, str):
+        return f'"{v}"'
+    return repr(v)
+
+
 def cmd_add_run(args) -> int:
     """Append a run of a new dataset (raw files only) to db/runs.toml."""
     import datetime as _dt
@@ -660,24 +668,33 @@ def cmd_add_run(args) -> int:
         return 2
     m = _re.match(r"(\d{4})(\d{2})(\d{2})", key)
     date = args.date or (f"{m[1]}-{m[2]}-{m[3]}" if m else _dt.date.today().isoformat())
-    labels = like.mass_labels if like and like.target == tgt else \
-        db.species[tgt].data_labels[:1]
+    lab = db.pipeline["peaks"].get("new_runs", {}).get("labels", {}).get(tgt)
+    labels = [int(lab)] if lab is not None else db.species[tgt].data_labels[:1]
     species = like.spectra_species if like else [tgt, "H", "C", "O"]
     rec = like.rec if like else None
+    if args.energy is not None:
+        laser = f"{{ energy_mJ = {args.energy} }}"
+    elif rec is not None:            # e.g. the ps run: pulse / intensity, no energy
+        las = rec.laser.model_dump(exclude_defaults=True)
+        laser = "{ " + ", ".join(f"{k} = {_toml_val(v)}" for k, v in las.items()) + " }"
+    else:
+        print("ERROR: give --energy (or --like a run whose laser fields to copy)")
+        return 2
+    label = args.label or (f"{tgt}, {args.energy:g} mJ" if args.energy else f"{tgt}, {key}")
     block = f"""
 [runs."{key}"]
 include         = true
 target          = "{tgt}"
-label           = "{args.label or f'{tgt}, {args.energy:g} mJ'}"
+label           = "{label}"
 date            = {date}
-laser           = {{ energy_mJ = {args.energy} }}
+laser           = {laser}
 eia             = "{rec.eia if rec else 'EIA_2025'}"
 fc              = "{rec.fc if rec else 'FC_2025'}"
 acquisition     = "{rec.acquisition if rec else 'scope_2025'}"
 mass_labels     = {list(labels)}
 spectra_species = {list(species)}
 notes           = "new dataset, added with eiakit add-run{f' (like {args.like})' if like else ''}"
-""".replace("'", '"')
+"""
     p = db.root / "runs.toml"
     with open(p, "a", encoding="utf-8") as fh:
         fh.write(block)
@@ -842,7 +859,8 @@ def main(argv=None) -> int:
     p = sub.add_parser("add-run", help="add a new run folder (raw files only) to runs.toml")
     p.add_argument("folder", help="folder name in the data root (= the run key)")
     p.add_argument("--target", required=True, help="Nb, Al, ...")
-    p.add_argument("--energy", type=float, required=True, help="laser energy [mJ]")
+    p.add_argument("--energy", type=float, help="laser energy [mJ] (default: the laser "
+                                                "fields of --like, e.g. ps / intensity)")
     p.add_argument("--like", help="copy instruments / acquisition / species of this run "
                                   "(e.g. 20250611)")
     p.add_argument("--label")
