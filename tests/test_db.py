@@ -20,7 +20,9 @@ def db():
 
 def test_loads_and_is_consistent(db):
     assert db.check() == []
-    assert len(db.runs()) == 7
+    keys = {r.key for r in db.runs()}                  # new runs may be added: the 7 base runs
+    assert keys >= {"20250513", "20250602", "20250606", "20250611", "20250617", "20250623",
+                    "2026_1103 Nb analysis"}
     assert {r.key for r in db.runs(include_only=False)} >= {"20250506", "20250508"}
 
 
