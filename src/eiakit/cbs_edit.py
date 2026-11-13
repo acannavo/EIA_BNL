@@ -39,6 +39,7 @@ class CBSSession:
     comps: dict                      # z -> [Component]
     source: str
     dirty: set = field(default_factory=set)
+    exp_U: dict = field(default_factory=dict)  # z -> voltage of every measured point (exp)
 
     # ---------------------------------------------------------------- load
     @classmethod
@@ -61,7 +62,9 @@ class CBSSession:
                 c.extra["label"] = names.get(c.extra.get("cbs"), f"component_{c.extra.get('cbs')}")
         src = ("new run, no CBS fit yet: Seed / Add components" if rm.get("empty") else
                ("store " if rm.get("from_store") else "legacy ") + str(rm["fit_path"]))
-        return cls(db, run, rm["model"], rm["curves"], rm["exp"], comps, src)
+        s = cls(db, run, rm["model"], rm["curves"], rm["exp"], comps, src)
+        s.exp_U = point_voltages(db, run, data_root, rm["exp"])
+        return s
 
     # ---------------------------------------------------------------- views
     @property
@@ -381,6 +384,35 @@ class CBSSession:
                         source=f"eiakit CBS fitter (from {self.source})", note=note)
         self.dirty.clear()
         return p
+
+
+def point_voltages(db, run, data_root, exp: dict) -> dict:
+    """Deflector voltage of every measured point of exp {z: (t_us, y)}: each point is one
+    fitted peak of one voltage file, found by its TOF in the peak rows the calibration
+    uses (same N1 / N8 / Peaks-tab settings). NaN where no row matches (e.g. the legacy
+    checkpoint was built from other rows)."""
+    from .calibration import prepare_rows
+    try:
+        prep = prepare_rows(db, run, data_root)
+    except Exception:                                  # noqa: BLE001 - hover info only
+        return {}
+    if "error" in prep:
+        return {}
+    rows = prep["rows"]
+    keep = {int(m) for m in run.mass_labels}
+    rows = rows[rows.m.astype(int).isin(keep)]
+    out = {}
+    for z, (t_us, _) in exp.items():
+        sub = rows[rows.z.astype(int) == int(z)]
+        if sub.empty:
+            out[z] = np.full(len(t_us), np.nan)
+            continue
+        tt = sub.TOF.to_numpy(float) * 1e6
+        uu = sub.U.to_numpy(float)
+        j = np.abs(t_us[:, None] - tt[None, :]).argmin(axis=1)
+        ok = np.abs(tt[j] - t_us) <= 1e-9 * np.maximum(np.abs(t_us), 1.0)
+        out[z] = np.where(ok, uu[j], np.nan)
+    return out
 
 
 def default_label(existing: list[str]) -> str:

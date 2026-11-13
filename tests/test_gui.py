@@ -27,6 +27,16 @@ def test_window_tabs_and_cbs_fitter(tmp_path, monkeypatch):
     f.table.selectRow(0)
     app.processEvents()
     z = f.z()
+    # hover on a measured point shows its voltage
+    import numpy as np
+    from matplotlib.backend_bases import MouseEvent
+    f.draw()
+    f.canvas.draw()
+    te, ye = f.s.exp[z]
+    j = int(np.flatnonzero(np.isfinite(f.s.exp_U[z]))[0])
+    x, y = f.ax.transData.transform((te[j], ye[j]))
+    f.on_hover(MouseEvent("motion_notify_event", f.canvas, x, y))
+    assert f._hover.get_visible() and f._hover.get_text().startswith("U = %g V" % f.s.exp_U[z][j])
     f.s.fit(z, 0)
     p = f.s.save(w.paths.fits, "test")
     assert p.is_file()

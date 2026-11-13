@@ -479,6 +479,8 @@ class FitterTab(QWidget):
                                               gridspec_kw={"height_ratios": [3, 1]})
         self.canvas = FigureCanvasQTAgg(self.fig)
         self.canvas.mpl_connect("button_press_event", self.on_click)
+        self.canvas.mpl_connect("motion_notify_event", self.on_hover)
+        self._hover = None
         right.addWidget(NavigationToolbar2QT(self.canvas, self))
         right.addWidget(self.canvas, 3)
         self.table = QTableWidget(0, len(self.COLS))
@@ -626,7 +628,12 @@ class FitterTab(QWidget):
             ax.plot(t, s.curves[z], color="0.4", lw=1, label="data (interpolated)")
         te, ye = s.exp.get(z, (np.array([]), np.array([])))
         if len(te):
-            ax.plot(te, ye, "o", ms=3, color="black", label="measured points")
+            ax.plot(te, ye, "o", ms=3, color="black",
+                    label="measured points (hover: voltage)")
+        self._hover = ax.annotate("", (0, 0), xytext=(10, 10), textcoords="offset points",
+                                  fontsize=8, bbox={"boxstyle": "round", "fc": "lightyellow",
+                                                    "ec": "0.5"}, zorder=10)
+        self._hover.set_visible(False)
         sel = self.sel()
         for i, c in enumerate(s.comps.get(z, [])):
             y = s.component_curve(z, i)
@@ -759,6 +766,28 @@ class FitterTab(QWidget):
     def full(self):
         self._full = True
         self.draw()
+
+    def on_hover(self, ev):
+        """Measured point under the mouse: its deflector voltage (and t, signal)."""
+        z = self.z()
+        if self.s is None or z is None or self._hover is None:
+            return
+        te, ye = self.s.exp.get(z, (np.array([]), np.array([])))
+        show = False
+        if ev.inaxes is self.ax and len(te):
+            pts = self.ax.transData.transform(np.column_stack([te, ye]))
+            d = np.hypot(pts[:, 0] - ev.x, pts[:, 1] - ev.y)
+            j = int(np.argmin(d))
+            if d[j] < 7:
+                Us = self.s.exp_U.get(z)
+                U = Us[j] if Us is not None and j < len(Us) else np.nan
+                self._hover.xy = (te[j], ye[j])
+                self._hover.set_text((f"U = {U:g} V" if np.isfinite(U) else "U = ?")
+                                     + f"\nt = {te[j]:.4g} µs\nsignal {ye[j]:.3g}")
+                show = True
+        if show or self._hover.get_visible():
+            self._hover.set_visible(show)
+            self.canvas.draw_idle()
 
     # ------------------------------------------------------------------ edits
     def _after(self):
