@@ -457,7 +457,8 @@ class FitterTab(QWidget):
         gl = QVBoxLayout(g)
         self.click = QButtonGroup(self)
         for i, t in enumerate(("nothing", "peak of the selected component",
-                               "left window edge", "right window edge")):
+                               "left window edge", "right window edge",
+                               "half-maximum left (FWHM)", "half-maximum right (FWHM)")):
             rb = QRadioButton(t)
             rb.setChecked(i == 1)
             self.click.addButton(rb, i)
@@ -609,6 +610,9 @@ class FitterTab(QWidget):
             if i == sel and c.t_peak:
                 wl, wr = s.model.edges(c)
                 ax.axvspan(wl, wr, color=col, alpha=0.08)
+                for tt in (c.t_left, c.t_right):           # picked half-maximum edges
+                    if tt is not None and np.isfinite(tt):
+                        ax.axvline(tt, color=col, ls="--", lw=0.8)
         tot = s.total(z)
         if np.any(tot) and z in s.curves:
             ax.plot(t, tot, color="#2ca02c", lw=1.2, ls="--", label="total")
@@ -646,6 +650,11 @@ class FitterTab(QWidget):
         c = self.s.comps[z][i]
         if mode == 1:
             self.s.set_peak(z, i, ev.xdata)
+            self.click.button(4).setChecked(True)          # next: the half-maximum edges
+        elif mode in (4, 5):
+            self.s.set_half(z, i, "left" if mode == 4 else "right", ev.xdata)
+            if mode == 4:
+                self.click.button(5).setChecked(True)
         else:
             wl, wr = self.s.model.edges(c)
             self.s.set_window(z, i, ev.xdata if mode == 2 else wl, ev.xdata if mode == 3 else wr)

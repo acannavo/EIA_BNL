@@ -255,3 +255,15 @@ def test_cbs_session_edit_save_reload(tmp_path):
         assert len(list(tmp_path.glob(f"{key}/cbs_fit.*.json"))) >= 1     # backup kept
     finally:
         os.environ["EIA_FITS_ROOT"] = old
+
+
+def test_cbs_half_maximum_clicks_set_fwhm_and_kT():
+    from eiakit.cbs_edit import CBSSession
+    key = next(k for k in RUNS if (ROOT / k / "EIA-Results").is_dir())
+    s = CBSSession.load(db, db.run(key), ROOT)
+    z = next(z for z in s.zs if s.comps.get(z) and s.comps[z][0].active)
+    c = s.comps[z][0]
+    t0, kT0 = c.t_peak, c.kT
+    s.set_half(z, 0, "left", t0 - 0.1 * t0)
+    s.set_half(z, 0, "right", t0 + 0.12 * t0)
+    assert abs(c.fwhm - 0.22 * t0) < 1e-12 and c.kT != kT0 and c.A is not None

@@ -165,6 +165,22 @@ class CBSSession:
         c.win_src = "default" if left_us is None else "picked"
         self._refresh(z, i)
 
+    def set_half(self, z, i, side: str, t_us: float, refit_kT: bool = True):
+        """Click on a half-maximum edge (side 'left' / 'right'), as in the manual fitter:
+        once both are set, FWHM = t_right - t_left and kT from the FWHM (V0, A follow)."""
+        c = self.comps[z][i]
+        if side == "left":
+            c.t_left = float(t_us)
+        else:
+            c.t_right = float(t_us)
+        if np.isfinite(c.t_left) and np.isfinite(c.t_right) and c.t_right > c.t_left:
+            c.fwhm = float(c.t_right - c.t_left)
+            if c.win_src == "default":
+                c.win_left = c.win_right = None
+            if refit_kT:
+                self.kT_from_fwhm(z, i)
+        self.dirty.add(z)
+
     def kT_from_fwhm(self, z, i):
         c = self.comps[z][i]
         kT, V0 = self.model.kT_from_fwhm(c.fwhm, self._u(c), z)
