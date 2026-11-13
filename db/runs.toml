@@ -171,7 +171,7 @@ acquisition     = "scope_2026_mdo"
 mass_labels     = [92, 93]
 spectra_species = ["Nb", "H", "C", "O"]
 fit_file_labels = [93, 92]
-notes           = "laser energy unknown; FC aperture unknown (0.50 cm assumed, see FC_2026_ps)"
+notes           = "laser energy 3.3 mJ; FC aperture 20 mm diameter (FC_2026_ps)"
 [runs."2026_1103 Nb analysis".legacy]
 profile_peaks       = "legacy_untitled28"
 profile_calibration = "legacy_amu_e1602"
@@ -195,12 +195,12 @@ notes   = "ignored for now; has 4_MultiShotSameSpot and Full; target not confirm
 [runs."2026_1110 Al analysis"]
 include         = true
 target          = "Al"
-label           = "Al, 2026_1110 Al analysis"
-date            = 2026-11-13
+label           = "Al, 2026_1110 (ps)"
+date            = 2026-11-10
 laser           = { pulse = "ps", energy_mJ = 3.3, intensity_Wcm2 = 1e12, spot_um = 50.0, approximate = true }
 eia             = "EIA_2026_ps"
 fc              = "FC_2026_ps"
 acquisition     = "scope_2026_mdo"
 mass_labels     = [26]
-spectra_species = ['Al', 'H', 'C', 'O']
+spectra_species = ["Al", "H", "C", "O"]
 notes           = "new dataset, added with eiakit add-run (like 2026_1103 Nb analysis)"
