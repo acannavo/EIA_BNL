@@ -73,3 +73,21 @@ def test_peak_picker_u_clicks_reproduce_untitled28():
     assert len(m) == len(s.legacy) and np.allclose(m.TOF, m.TOF_leg, rtol=1e-12)
     s.set_clicks(lof_clicks=1)
     assert abs(s.L_used / s.L_m - 1.01) < 1e-9
+
+
+def test_saved_voltage_reopens_as_saved(tmp_path, monkeypatch):
+    from eiakit.db import load_database
+    from eiakit.peaks_edit import PeakSession
+    monkeypatch.setenv("EIA_FITS_ROOT", str(tmp_path))
+    db = load_database()
+    run = db.run("20250611")
+    s = PeakSession.load(db, run, ROOT, 35.0)
+    s.set_clicks(u_clicks=-7)
+    s.refit(0.005)
+    s.exclude(1)
+    want = s.fits[["m", "z", "TOF", "Yield"]].copy()
+    s.save(tmp_path)
+    s2 = PeakSession.load(db, run, ROOT, 35.0)
+    assert s2.restore(tmp_path)
+    assert (s2.u_clicks, s2.corr, s2.excluded) == (-7, 0.005, {1})
+    assert (s2.fits[["m", "z", "TOF", "Yield"]].to_numpy() == want.to_numpy()).all()

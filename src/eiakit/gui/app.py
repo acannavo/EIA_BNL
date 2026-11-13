@@ -877,11 +877,17 @@ class PeaksTab(QWidget):
         except Exception as e:                         # noqa: BLE001 - shown to the user
             QMessageBox.warning(self, "Peaks", str(e))
             return
-        self._loading = True                           # new voltage: clicks back to 0
-        self.uclk.setValue(0)
-        self.lclk.setValue(0)
-        self.auto.setChecked(True)
+        saved = self.s.restore(self.win.paths.fits)    # a saved voltage: as it was saved
+        self._loading = True
+        self.uclk.setValue(self.s.u_clicks)
+        self.lclk.setValue(self.s.lof_clicks)
+        self.corr.setValue(self.s.corr)
+        self.auto.setChecked(self.s.k != 1.0 or not self.s.run.is_new)
         self._loading = False
+        if saved:
+            self.win.log.appendPlainText(f"U = {self.s.U:g} V: the saved fit (clicks "
+                                         f"{self.s.u_clicks}, LOF clicks {self.s.lof_clicks}, "
+                                         f"Corr {self.s.corr:g})")
         self.show_table()
 
     def sel(self):
@@ -1007,9 +1013,11 @@ class PeaksTab(QWidget):
             f"voltage saved: {p}\n  It is used from the next run of {self.s.run.key}: Runs "
             f"tab -> Run selected (the calibration line then lists "
             f"'voltages_from_peaks_tab'). To undo: delete that file and run again.")
-        r = self.ulist.currentRow()
-        self.fill_U(self.run_box.currentText())
-        self.ulist.setCurrentRow(r)
+        it = self.ulist.currentItem()                  # mark it saved; keep the session
+        if it is not None and "*" not in it.text():
+            t = it.text()
+            j = t.find(" V") + 2
+            it.setText(t[:j] + " *" + t[j:])
         self.win.runs.refresh()
 
 

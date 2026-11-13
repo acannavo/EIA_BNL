@@ -133,6 +133,23 @@ class PeakSession:
         s.refit()
         return s
 
+    def restore(self, fits_root) -> bool:
+        """Load the settings of a saved voltage (fits/<run>/peaks/p<U>.json): clicks, Corr,
+        moved windows, excluded lines, centring; refit. True if there was one."""
+        p = peaks_dir(fits_root, self.run) / f"p{_ustr(self.U)}.json"
+        if fits_root is None or not p.is_file():
+            return False
+        m = json.loads(p.read_text(encoding="utf-8"))
+        self.u_clicks = int(m.get("u_clicks", 0))
+        self.lof_clicks = int(m.get("lof_clicks", 0))
+        self.corr = float(m.get("corr", 0.0))
+        self.k = float(m.get("auto_centre_k", self.k))
+        self.centers = {int(i): float(t) for i, t in m.get("centers_s", {}).items()}
+        ex = {tuple(x) for x in m.get("excluded", [])}
+        self.excluded = {i for i, (_, lab, z) in enumerate(self.lines) if (lab, z) in ex}
+        self.refit()
+        return True
+
     @property
     def U_used(self) -> float:
         """U of the fit windows: the file voltage after the arrow clicks (untitled28)."""
