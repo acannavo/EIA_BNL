@@ -27,7 +27,7 @@ import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
 from PySide6.QtCore import QProcess, QProcessEnvironment, Qt, QUrl
-from PySide6.QtGui import QColor, QDesktopServices, QFont
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -50,6 +50,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QRadioButton,
+    QSlider,
     QSpinBox,
     QSplitter,
     QTableWidget,
@@ -427,7 +428,7 @@ class SettingsTab(QWidget):
 
 class FitterTab(QWidget):
     COLS = ["label", "t_peak [µs]", "FWHM [µs]", "kT [eV]", "V0 [V]", "A", "u [km/s]",
-            "t_fit [µs]", "FWHM fit [µs]"]
+            "t_fit [µs]", "FWHM fit [µs]", "locked"]
     EDIT = {1: "peak", 2: "fwhm", 3: "kT", 4: "V0", 5: "A"}
 
     def __init__(self, win):
@@ -435,6 +436,9 @@ class FitterTab(QWidget):
         self.win = win
         self.s = None
         self._busy = False
+        self._full = False
+        esc = QShortcut(QKeySequence(Qt.Key_Escape), self, self.full)
+        esc.setContext(Qt.WidgetWithChildrenShortcut)
         lay = QHBoxLayout(self)
         left = QVBoxLayout()
         row = QHBoxLayout()
@@ -482,8 +486,28 @@ class FitterTab(QWidget):
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.itemChanged.connect(self.edited)
-        self.table.itemSelectionChanged.connect(self.draw)
+        self.table.itemSelectionChanged.connect(self.row_changed)
         right.addWidget(self.table, 1)
+        sl = QHBoxLayout()
+        self.sA, self.skT = QSlider(Qt.Horizontal), QSlider(Qt.Horizontal)
+        self.lA, self.lkT = QLabel("A"), QLabel("kT")
+        for sld, lab_, tip in ((self.sA, self.lA, "amplitude A of the selected component: "
+                                "÷10 … ×10 around its value when you grab the slider"),
+                               (self.skT, self.lkT, "kT of the selected component, ÷10 … ×10: "
+                                "the peak stays where it is (V0 follows) and the peak height "
+                                "is kept (A follows)")):
+            sld.setRange(-100, 100)
+            sld.setValue(0)
+            sld.setToolTip(tip)
+            sl.addWidget(lab_)
+            sl.addWidget(sld, 1)
+        self.sA.valueChanged.connect(lambda v: self.slide("A", v))
+        self.skT.valueChanged.connect(lambda v: self.slide("kT", v))
+        for sld in (self.sA, self.skT):
+            sld.sliderPressed.connect(self.grab_base)
+            sld.sliderReleased.connect(self.release_slider)
+        self._base = None
+        right.addLayout(sl)
         row = QHBoxLayout()
         self.kT_hi = QDoubleSpinBox()
         self.kT_hi.setRange(0, 1e6)
@@ -505,6 +529,10 @@ class FitterTab(QWidget):
                        "replace the components of this z by ones proposed from the peaks of "
                        "its J_z(t) (labelled by arrival time), then Fit each"),
                   _btn("Seed all z", self.seed_all, "Seed every z that has no component yet"),
+                  _btn("Lock / unlock", self.toggle_lock,
+                       "locked: Fit and Seed leave this component as you set it (sliders, "
+                       "typed values); it still counts when the others are fitted"),
+                  _btn("Full spectrum", self.full, "whole time range (also Esc)"),
                   _btn("Save to store", self.save,
                        "fits/<run>/cbs_fit.json (previous version kept)")):
             row.addWidget(b)
@@ -567,7 +595,8 @@ class FitterTab(QWidget):
         self.table.setRowCount(len(tab))
         for r, rec in enumerate(tab.to_dict("records")):
             vals = [rec["label"], rec["t_peak_us"], rec["FWHM_us"], rec["kT_eV"], rec["V0_V"],
-                    rec["A"], rec["u_kms"], rec["t_peak_fit_us"], rec["FWHM_fit_us"]]
+                    rec["A"], rec["u_kms"], rec["t_peak_fit_us"], rec["FWHM_fit_us"],
+                    "locked" if self.s.locked(z, r) else ""]
             for c, v in enumerate(vals):
                 txt = v if isinstance(v, str) else ("" if v is None or not np.isfinite(v)
                                                     else f"{v:.6g}")
@@ -610,6 +639,12 @@ class FitterTab(QWidget):
             if i == sel and c.t_peak:
                 wl, wr = s.model.edges(c)
                 ax.axvspan(wl, wr, color=col, alpha=0.08)
+                h = s.data_at(z, c.t_peak)              # guides for the FWHM clicks
+                if np.isfinite(h) and h > 0:
+                    ax.axhline(h, color=col, ls=":", lw=0.9)
+                    ax.axhline(h / 2, color=col, ls="--", lw=1.1)
+                    ax.annotate("½ max", (c.t_peak, h / 2), color=col, fontsize=8,
+                                xytext=(4, 3), textcoords="offset points")
                 for tt in (c.t_left, c.t_right):           # picked half-maximum edges
                     if tt is not None and np.isfinite(tt):
                         ax.axvline(tt, color=col, ls="--", lw=0.8)
@@ -628,7 +663,10 @@ class FitterTab(QWidget):
             pk = float(np.nanmax(s.curves.get(z, [1]))) or 1.0
             ax.set_ylim(pk * 1e-4, pk * 2)
         cs = [c for c in s.comps.get(z, []) if c.t_peak]
-        if cs:
+        if self._full and len(te):
+            pad = 0.05 * (te.max() - te.min())
+            ax.set_xlim(te.min() - pad, te.max() + pad)
+        elif cs:
             lo = min(s.model.edges(c)[0] for c in cs)
             hi = max(s.model.edges(c)[1] for c in cs)
             ax.set_xlim(lo - 0.3 * (hi - lo), hi + 0.3 * (hi - lo))
@@ -636,6 +674,67 @@ class FitterTab(QWidget):
         self.canvas.draw_idle()
         x2, dof = s.chi2(z)
         self.info.setText(f"χ² = {x2:.4g} for {dof} dof" if dof > 0 else "no active component")
+
+    # ------------------------------------------------------------------ sliders, lock
+    def row_changed(self):
+        self._full = False
+        self._base = None
+        self.draw()
+
+    def grab_base(self):
+        z, i = self.z(), self.sel()
+        if z is None or i is None:
+            self._base = None
+            return
+        c = self.s.comps[z][i]
+        self._base = (z, i, c.A, c.kT)
+
+    def slide(self, which, v):
+        if self._busy or self.s is None:
+            return
+        if self._base is None or self._base[:2] != (self.z(), self.sel()):
+            self.grab_base()
+        if self._base is None:
+            return
+        z, i, A0, kT0 = self._base
+        f = 10 ** (v / 100.0)
+        if which == "A" and A0:
+            self.s.set_A(z, i, A0 * f)
+        ok = True
+        if which == "A" and A0:
+            pass
+        elif which == "kT" and kT0:
+            ok = self.s.set_kT_keep_height(z, i, kT0 * f)
+        c = self.s.comps[z][i]
+        self.lA.setText(f"A {c.A:.4g}" if c.A else "A")
+        self.lkT.setText(f"kT {c.kT:.4g} eV" if ok else
+                         f"kT {kT0 * f:.4g} eV: peak not reachable (V0 < 0)")
+        self.draw()
+
+    def release_slider(self):
+        """Slider back to the middle; the new values become the base of the next move."""
+        if self.s is None:
+            return
+        self._busy = True
+        self.sA.setValue(0)
+        self.skT.setValue(0)
+        self._busy = False
+        self._base = None
+        r = self.sel()
+        self.show_z(self.zlist.currentRow())
+        if r is not None:
+            self.table.selectRow(r)
+
+    def toggle_lock(self):
+        z, i = self.z(), self.sel()
+        if z is not None and i is not None:
+            self.s.lock(z, i, not self.s.locked(z, i))
+            self._after()
+            self.table.selectRow(i)
+
+    def full(self):
+        self._full = True
+        self.draw()
 
     # ------------------------------------------------------------------ edits
     def _after(self):
@@ -680,6 +779,10 @@ class FitterTab(QWidget):
     def fit(self):
         z, i = self.z(), self.sel()
         if z is not None and i is not None:
+            if self.s.locked(z, i):
+                QMessageBox.information(self, "Fit", "This component is locked (your manual "
+                                        "values are kept). Unlock it to fit.")
+                return
             out = self.s.fit(z, i, self.kT_hi.value() or None)
             if out is None:
                 QMessageBox.information(self, "Fit", "No valid kT on the grid (V0 or A not "
@@ -762,6 +865,8 @@ class PeaksTab(QWidget):
     def __init__(self, win):
         super().__init__()
         self.win, self.s, self._loading = win, None, False
+        esc = QShortcut(QKeySequence(Qt.Key_Escape), self, self.full)
+        esc.setContext(Qt.WidgetWithChildrenShortcut)
         lay = QHBoxLayout(self)
         left = QVBoxLayout()
         self.run_box = QComboBox()
@@ -906,12 +1011,6 @@ class PeaksTab(QWidget):
     def full(self):
         self.table.clearSelection()
         self.draw()
-
-    def keyPressEvent(self, ev):
-        if ev.key() == Qt.Key_Escape:
-            self.full()
-        else:
-            super().keyPressEvent(ev)
 
     def clicks(self, u=None, lof=None):
         if self.s is None or self._loading:

@@ -281,3 +281,33 @@ def test_cbs_typed_V0_moves_the_peak_consistently():
     # consistent: V0 from (kT, the new peak) gives back the typed V0
     assert abs(s.model.V0_from_u(kT, s.model.L_m / (c.t_peak * 1e-6), z) / c.V0 - 1) < 1e-6
     assert abs(s.table(z).t_peak_fit_us.iloc[0] / c.t_peak - 1) < 1e-3
+
+
+def test_cbs_sliders_and_lock(tmp_path, monkeypatch):
+    """kT slider keeps peak position and height; locked components survive Fit, Seed, save."""
+    import numpy as np
+
+    from eiakit.cbs_edit import CBSSession
+    key = next(k for k in RUNS if (ROOT / k / "EIA-Results").is_dir())
+    run = db.run(key)
+    s = CBSSession.load(db, run, ROOT)
+    z = next(z for z in s.zs if s.comps.get(z) and s.comps[z][0].active)
+    c = s.comps[z][0]
+    h, t = s.peak_height(z, 0), c.t_peak
+    assert not s.set_kT_keep_height(z, 0, c.kT * 50)   # thermal peak alone too fast: refused
+    assert s.set_kT_keep_height(z, 0, c.kT * 0.6)
+    assert abs(s.peak_height(z, 0) / h - 1) < 1e-9 and c.t_peak == t
+    assert abs(s.table(z).t_peak_fit_us.iloc[0] / t - 1) < 2e-3        # peak did not move
+    s.set_A(z, 0, c.A * 0.8)
+    s.lock(z, 0)
+    kept = (c.kT, c.V0, c.A)
+    assert s.fit(z, 0) is None and (c.kT, c.V0, c.A) == kept
+    s.seed(z)
+    assert any(x.extra.get("locked") and (x.kT, x.V0, x.A) == kept for x in s.comps[z])
+    monkeypatch.setenv("EIA_FITS_ROOT", str(tmp_path))
+    monkeypatch.setenv("EIA_PROCESSED_ROOT", str(tmp_path / "p"))
+    monkeypatch.setenv("EIA_STUDIES_ROOT", str(tmp_path / "s"))
+    s.save(tmp_path)
+    s2 = CBSSession.load(db, run, ROOT)
+    lk = [x for x in s2.comps[z] if x.extra.get("locked")]
+    assert len(lk) == 1 and np.allclose((lk[0].kT, lk[0].V0, lk[0].A), kept, rtol=1e-12)

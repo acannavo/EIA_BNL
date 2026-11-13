@@ -134,7 +134,10 @@ class CBSSession:
         return max(self.model.kT_max, 3.0 * k) if k else self.model.kT_guess_max
 
     def fit(self, z, i, kT_hi=None):
-        """Fit button: kT scan (up to kT_hi, default auto_kT_hi), V0 from u, A analytic."""
+        """Fit button: kT scan (up to kT_hi, default auto_kT_hi), V0 from u, A analytic.
+        A locked component is not changed (returns None)."""
+        if self.locked(z, i):
+            return None
         kT_hi = kT_hi or self.auto_kT_hi(z, i)
         out = self.model.fit_component(self.comps[z], i, self.curves[z], z, kT_hi)
         self.dirty.add(z)
@@ -170,6 +173,40 @@ class CBSSession:
             A = m.analytic_A(m.shape(c.kT, c.V0, z), r, m.mask(c))
             c.A = None if not np.isfinite(A) or A <= 0 else float(A)
         self.dirty.add(z)
+
+    def peak_height(self, z, i) -> float:
+        """Maximum of the component curve (A x shape)."""
+        y = self.component_curve(z, i)
+        return float(np.nanmax(y)) if y is not None else float("nan")
+
+    def set_kT_keep_height(self, z, i, kT: float):
+        """kT slider of the manual fitter: the peak stays where it is (V0 from kT and u)
+        and the component keeps its peak height (A rescaled)."""
+        c = self.comps[z][i]
+        h = self.peak_height(z, i)
+        V0 = self.model.V0_from_u(float(kT), self._u(c), z)
+        if V0 is None or V0 <= 0:
+            return False
+        c.kT, c.V0 = float(kT), float(V0)
+        mx = float(np.nanmax(self.model.shape(c.kT, c.V0, z)))
+        if np.isfinite(h) and mx > 0:
+            c.A = h / mx
+        self.dirty.add(z)
+        return True
+
+    def lock(self, z, i, flag: bool = True):
+        """Locked components keep their (hand-set) parameters: Fit and Seed skip them; they
+        still count as fixed contributions when the other components are fitted."""
+        self.comps[z][i].extra["locked"] = bool(flag)
+        self.dirty.add(z)
+
+    def locked(self, z, i) -> bool:
+        return bool(self.comps[z][i].extra.get("locked", False))
+
+    def data_at(self, z, t_us: float) -> float:
+        """Data curve at a time (for the half-maximum guide of the peak click)."""
+        return float(np.interp(t_us, self.t_us(), self.curves[z])) if z in self.curves \
+            else float("nan")
 
     def set_A(self, z, i, A: float):
         self.comps[z][i].A = float(A)
@@ -256,16 +293,19 @@ class CBSSession:
         dt = float(np.median(np.diff(t)))
         names = {1: ["slow"], 2: ["fast", "slow"], 3: ["ultra_fast", "fast", "slow"]}
         labels = names.get(len(pk), LABEL_ORDER[:len(pk)])
-        self.comps[z] = []
-        for j, lab in zip(pk, labels, strict=True):
-            fw = max(float(widths[list(pk).index(j)]) * dt, 3 * dt)
+        kept = [c for c in self.comps.get(z, []) if c.extra.get("locked")]
+        self.comps[z] = kept                          # locked components stay
+        labels = [lab for lab in labels if lab not in {c.extra.get("label") for c in kept}]
+        pk = pk[:len(labels)]
+        for j, lab, wid in zip(pk, labels, widths, strict=False):
+            fw = max(float(wid) * dt, 3 * dt)
             i = self.add(z, lab, float(t[j]), fw)
             c = self.comps[z][i]
             c.t_left, c.t_right = float(t[j]) - fw / 2, float(t[j]) + fw / 2
         if fit:
             for i in range(len(self.comps[z])):
                 try:
-                    self.fit(z, i)
+                    self.fit(z, i)              # locked ones are skipped by fit()
                 except Exception:                      # noqa: BLE001 - keep the seed
                     pass
         self.dirty.add(z)
@@ -326,7 +366,8 @@ class CBSSession:
                 blocks.append(CBSComponent(
                     z=z, cbs=n, picks={"t_peak": c.t_peak, "t_left": c.t_left,
                                        "t_right": c.t_right, "FWHM": c.fwhm},
-                    window={"win_left": wl, "win_right": wr, "src": c.win_src},
+                    window={"win_left": wl, "win_right": wr, "src": c.win_src,
+                            **({"locked": 1.0} if c.extra.get("locked") else {})},
                     triplet=self._triplet(z, m.get("t_peak", np.nan)),
                     kT=row["kT_eV"], V0=row["V0_V"], A=row["A"]))
         h = FileHeader(generated=None, L_EIA_m=self.model.L_m, M_ION_kg=self.model.m_kg,

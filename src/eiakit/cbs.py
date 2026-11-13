@@ -343,7 +343,8 @@ def components_from_fit_file(fit) -> dict[int, list[Component]]:
                       win_right=float(r.win_right), win_src=src.replace("_", " "),
                       t_left=float(r.t_left_pick), t_right=float(r.t_right_pick),
                       extra={"t_peak_click": float(r.t_peak_pick), "row": r._asdict(),
-                             "cbs": int(r.CBS)})
+                             "cbs": int(r.CBS),
+                             "locked": bool(blk.window.get("locked", 0)) if blk else False})
         out.setdefault(int(r.z), []).append(c)
     return out
 
