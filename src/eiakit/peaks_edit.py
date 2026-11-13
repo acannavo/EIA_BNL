@@ -67,6 +67,7 @@ class PeakSession:
     L_m: float
     profile: object
     settings: dict
+    k: float = 1.0                   # window-centre factor (new runs: from the peaks stage)
     centers: dict = field(default_factory=dict)      # i -> t0 override (s)
     excluded: set = field(default_factory=set)
     corr: float = 0.0
@@ -80,7 +81,8 @@ class PeakSession:
                        if u is not None})
 
     @classmethod
-    def load(cls, db, run, data_root, U: float, all_lines: bool = False) -> PeakSession:
+    def load(cls, db, run, data_root, U: float, all_lines: bool = False,
+             processed=None) -> PeakSession:
         """all_lines: every z up to the run's z max for every mass; default: the (m, z)
         the Output of this voltage holds (what was fitted then), else every line."""
         from .acquisition import read_trace, scan_folder
@@ -94,6 +96,22 @@ class PeakSession:
         tof, y = average_repeats([traces[r] for r in sorted(traces)])
         settings = dict(db.pipeline["peaks"])
         gui = {int(k): float(v) for k, v in settings.pop("gui_masses", {}).items()}
+        if run.is_new:
+            # new run: the fits of the peaks stage are the reference; same lines, same
+            # window-centre factor k of this voltage
+            from .peaks import new_run_lines
+            stage = Path(processed) / run.key / "10_peaks" if processed is not None else None
+            det = read_output_folder(stage / "output_detail") if stage else pd.DataFrame()
+            k = 1.0
+            if stage is not None and (stage / "fits.csv").is_file():
+                f = pd.read_csv(stage / "fits.csv")
+                f = f[np.isclose(f.U, U)]
+                k = float(f.k.iloc[0]) if len(f) else 1.0
+            prof = db.profile(db.profile_for(run, "peaks"))
+            s = cls(db, run, U, tof, y, traces, new_run_lines(db, run),
+                    det[det.U == U] if len(det) else det, run.eia.L_m, prof, settings, k=k)
+            s.refit()
+            return s
         rows = read_output_folder(sem / "Output")
         det = read_output_folder(sem / "Output_detail")
         zmax = (rows.groupby("m").z.max().to_dict() if len(rows)
@@ -114,7 +132,7 @@ class PeakSession:
     def t0(self, i) -> float:
         m_amu, _, z = self.lines[i]
         return self.centers.get(i, predicted_tof(m_amu, z, self.U, self.L_m, self.run.eia,
-                                                 self.profile))
+                                                 self.profile) * self.k)
 
     def refit(self, corr: float | None = None):
         if corr is not None:
@@ -128,6 +146,7 @@ class PeakSession:
                          self.settings.get("min_points", 1))
             row = {"i": i, "m": label, "z": z, "t0": t0, "TOF": f["mu"], "Yield": f["A"],
                    "sigma": f["sigma"], "B": f["B"], "success": bool(f["success"]),
+                   "at_edge": bool(f["success"] and f.get("mu_at_bound", False)),
                    "excluded": i in self.excluded}
             if f["success"]:
                 vals = [float(np.interp(f["mu"], *self.traces[r])) for r in reps]

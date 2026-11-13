@@ -14,6 +14,9 @@ ROOT = Path(os.environ.get("EIA_DATA_ROOT", "/nonexistent"))
 db = load_database()
 # these tests compare with the legacy scripts: legacy constants (I1 off)
 db.pipeline.setdefault("corrections", {})["mass_constants"] = "legacy"
+# ... and the FC aperture the 2026 legacy analysis assumed (0.50 cm; real: 20 mm diameter)
+db.instruments.fc["FC_2026_ps"] = db.instruments.fc["FC_2026_ps"].model_copy(
+    update={"aperture_radius_cm": 0.50})
 RUNS = [r.key for r in db.runs() if (ROOT / r.key / "EIA-Results").is_dir()]
 
 pytestmark = pytest.mark.skipif(not RUNS, reason="no data (EIA_DATA_ROOT not set or empty)")

@@ -197,7 +197,8 @@ class RunsTab(QWidget):
                 it.setToolTip("\n".join(st["reasons"][:6]) or "up to date")
                 self.table.setItem(r, 3 + j, it)
             sp = store_path(paths.fits, run)
-            it = QTableWidgetItem("store" if sp.is_file() else "legacy file")
+            it = QTableWidgetItem("store" if sp.is_file() else
+                                  ("none yet" if run.is_new else "legacy file"))
             it.setToolTip(str(sp) if sp.is_file() else "no fit store: the legacy "
                           "CBS_fit_results file is used")
             self.table.setItem(r, len(cols) - 1, it)
@@ -746,7 +747,7 @@ class FitterTab(QWidget):
 
 class PeaksTab(QWidget):
     COLS = ["m", "z", "t0 [µs]", "TOF [µs]", "Yield [V]", "σ [ns]", "ok", "excluded",
-            "legacy TOF [µs]", "legacy Yield [V]"]
+            "ref. TOF [µs]", "ref. Yield [V]"]
 
     def __init__(self, win):
         super().__init__()
@@ -799,8 +800,10 @@ class PeaksTab(QWidget):
             row.addWidget(b)
         row.addStretch()
         right.addLayout(row)
-        right.addWidget(QLabel("Click on the plot: centre of the fit window of the selected "
-                               "line (the fit then searches ± 150 ns around it)."))
+        right.addWidget(QLabel("Orange rows: the fit ended at the edge of its ± 150 ns search "
+                               "(missed peak or no peak). Select the row, click on the real "
+                               "peak (new window centre, refit), or Exclude the line; then "
+                               "Save voltage."))
         rw = QWidget()
         rw.setLayout(right)
         lay.addWidget(rw, 1)
@@ -814,10 +817,18 @@ class PeaksTab(QWidget):
         run = self.run()
         ov = override_files(self.win.paths.fits, run)
         self.Us = PeakSession.voltages(run, self.win.paths.data)
+        edges = {}
+        fits = self.win.paths.processed / run.key / "10_peaks" / "fits.csv"
+        if run.is_new and fits.is_file():
+            import pandas as pd
+            f = pd.read_csv(fits)
+            edges = (f.success & f.mu_at_bound).groupby(f.U).sum().to_dict()
         self.ulist.blockSignals(True)
         self.ulist.clear()
         for U in self.Us:
-            self.ulist.addItem(f"U = {U:g} V" + (" *" if U in ov else ""))
+            n = int(edges.get(U, 0))
+            self.ulist.addItem(f"U = {U:g} V" + (" *" if U in ov else "")
+                               + (f"   ({n} at edge)" if n else ""))
         self.ulist.blockSignals(False)
         self.s = None
         if self.Us:
@@ -834,7 +845,8 @@ class PeaksTab(QWidget):
             return
         try:
             self.s = PeakSession.load(self.win.db, self.run(), self.win.paths.data,
-                                      self.Us[r], self.all_lines.isChecked())
+                                      self.Us[r], self.all_lines.isChecked(),
+                                      self.win.paths.processed)
         except Exception as e:                         # noqa: BLE001 - shown to the user
             QMessageBox.warning(self, "Peaks", str(e))
             return
@@ -853,13 +865,16 @@ class PeaksTab(QWidget):
         for r, rec in enumerate(f.to_dict("records")):
             lt, ly = li.get((int(rec["m"]), int(rec["z"])), (np.nan, np.nan))
             vals = [rec["m"], rec["z"], rec["t0"] * 1e6, rec["TOF"] * 1e6, rec["Yield"],
-                    rec["sigma"] * 1e9, "yes" if rec["success"] else "no",
+                    rec["sigma"] * 1e9,
+                    ("at edge" if rec.get("at_edge") else "yes") if rec["success"] else "no",
                     "yes" if rec["excluded"] else "", lt * 1e6, ly]
             for c, v in enumerate(vals):
                 txt = v if isinstance(v, str) else ("" if not np.isfinite(v) else f"{v:.6g}")
                 it = QTableWidgetItem(txt)
                 if rec["excluded"]:
                     it.setForeground(QColor("#999999"))
+                elif rec.get("at_edge") or not rec["success"]:
+                    it.setBackground(QColor("#ffe0b2"))
                 self.table.setItem(r, c, it)
         self.table.blockSignals(False)
         self.table.resizeColumnsToContents()
@@ -881,7 +896,8 @@ class PeaksTab(QWidget):
                 ax.plot(s.tof[w] * 1e6, g[w], color=col, lw=2 if i == sel else 1.2)
         for k, t_leg in enumerate(s.legacy.TOF if len(s.legacy) else []):
             ax.axvline(t_leg * 1e6, ymax=0.08, color="#ff7f0e", lw=2,
-                       label="legacy fit position" if k == 0 else None)
+                       label=("pipeline fit" if s.run.is_new else "untitled28 fit")
+                       + " position" if k == 0 else None)
         ts = s.fits.t0
         ax.set_xlim(ts.min() * 0.9e6, ts.max() * 1.1e6)
         if sel is not None:

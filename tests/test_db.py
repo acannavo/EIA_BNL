@@ -30,7 +30,7 @@ def test_run_key_is_folder_name(db):
     assert r.folder(Path("/data")) == Path("/data/20250623")
     new = db.run("2026_1103 Nb analysis")
     assert (new.eia.L_m, new.fc.L_m, new.fc.R_load_ohm) == (1.22, 0.58, 51.0)
-    assert "fc.aperture_radius_cm" in new.provisional
+    assert new.fc.aperture_radius_cm == 1.0 and "fc.aperture_radius_cm" not in new.provisional
     with pytest.raises(KeyError):
         db.run("nope")
 

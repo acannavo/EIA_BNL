@@ -73,3 +73,17 @@ def test_peak_fit_matches_untitled28_on_strong_lines(env):
     assert len(strong) >= 6
     assert (abs(strong.TOF / strong.TOF_leg - 1) < 1e-3).all()
     assert (abs(strong.Yield / strong.YieldAveFit_leg - 1) < 0.03).all()
+
+
+def test_peak_picker_on_a_new_run_reproduces_the_pipeline(env):
+    from eiakit.cli import main
+    from eiakit.db import load_database
+    from eiakit.peaks_edit import PeakSession
+    main(["add-run", "20251120", "--target", "Nb", "--energy", "780", "--like", "20250611"])
+    assert main(["run", "20251120", "--stage", "peaks"]) == 0
+    db = load_database()
+    s = PeakSession.load(db, db.run("20251120"), env / "data", 35.0,
+                         processed=env / "processed")
+    assert len(s.fits) == len(s.legacy) > 20 and s.k != 1.0
+    m = s.fits[s.fits.success].merge(s.legacy, on=["m", "z"], suffixes=("", "_ref"))
+    assert (abs(m.TOF / m.TOF_ref - 1) < 1e-12).all()

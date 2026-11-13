@@ -39,11 +39,10 @@ R_load_ohm         = 51.0
 provisional        = []
 
 [fc.FC_2026_ps]
-description        = "2026_1103 Nb run. Aperture differs from 2025 but is not known yet: 0.50 cm assumed"
+description        = "2026 ps runs (2026_1103 Nb, 2026_1110 Al)"
 L_m                = 0.58
-aperture_radius_cm = 0.50
+aperture_radius_cm = 1.00     # 20 mm diameter (user, 2026-11-13; was 0.50 cm assumed)
 R_load_ohm         = 51.0     # confirmed same as 2025
-provisional        = ["aperture_radius_cm"]
 
 # ---- Acquisition / file formats -------------------------------------------
 #  How raw files are named and laid out. A run can override any field with
