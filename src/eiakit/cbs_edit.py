@@ -151,6 +151,26 @@ class CBSSession:
         self.comps[z][i].kT = float(kT)
         self._refresh(z, i)
 
+    def set_V0(self, z, i, V0: float, keep_A: bool = False):
+        """V0 by hand (kT kept): the peak moves to where (kT, V0) put it,
+        t_peak = L / u_peak(kT, V0); A analytic unless keep_A. A later Fit scans kT again
+        with V0 tied to this peak."""
+        from . import physics as ph
+        c = self.comps[z][i]
+        if c.kT is None or V0 <= 0:
+            return
+        m = self.model
+        u = float(ph.cbs_peak_velocity(c.kT, float(V0), z, m.m_kg, m.e_C, m.gamma))
+        c.V0 = float(V0)
+        c.t_peak = m.L_m / u * 1e6
+        if c.win_src == "default":
+            c.win_left = c.win_right = None
+        if not keep_A:
+            r = m.residual(self.comps[z], i, self.curves[z], z)
+            A = m.analytic_A(m.shape(c.kT, c.V0, z), r, m.mask(c))
+            c.A = None if not np.isfinite(A) or A <= 0 else float(A)
+        self.dirty.add(z)
+
     def set_A(self, z, i, A: float):
         self.comps[z][i].A = float(A)
         self.dirty.add(z)

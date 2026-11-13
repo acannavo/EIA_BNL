@@ -428,7 +428,7 @@ class SettingsTab(QWidget):
 class FitterTab(QWidget):
     COLS = ["label", "t_peak [µs]", "FWHM [µs]", "kT [eV]", "V0 [V]", "A", "u [km/s]",
             "t_fit [µs]", "FWHM fit [µs]"]
-    EDIT = {1: "peak", 2: "fwhm", 3: "kT", 5: "A"}
+    EDIT = {1: "peak", 2: "fwhm", 3: "kT", 4: "V0", 5: "A"}
 
     def __init__(self, win):
         super().__init__()
@@ -672,7 +672,7 @@ class FitterTab(QWidget):
             else:
                 v = float(txt)
                 {1: self.s.set_peak, 2: self.s.set_fwhm, 3: self.s.set_kT,
-                 5: self.s.set_A}[c](z, r, v)
+                 4: self.s.set_V0, 5: self.s.set_A}[c](z, r, v)
         except (ValueError, KeyError):
             pass
         self._after()
