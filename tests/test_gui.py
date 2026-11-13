@@ -36,7 +36,7 @@ def test_window_tabs_and_cbs_fitter(tmp_path, monkeypatch):
     j = int(np.flatnonzero(np.isfinite(f.s.exp_U[z]))[0])
     x, y = f.ax.transData.transform((te[j], ye[j]))
     f.on_hover(MouseEvent("motion_notify_event", f.canvas, x, y))
-    assert f._hover.get_visible() and f._hover.get_text().startswith("U = %g V" % f.s.exp_U[z][j])
+    assert f._hover.get_visible() and f._hover.get_text().startswith(f"U = {f.s.exp_U[z][j]:g} V")
     f.s.fit(z, 0)
     p = f.s.save(w.paths.fits, "test")
     assert p.is_file()
@@ -52,4 +52,27 @@ def test_window_tabs_and_cbs_fitter(tmp_path, monkeypatch):
     w.baseline.run_box.setCurrentText("20250611")
     w.baseline.load()
     assert abs(w.baseline.value.value() - 0.4636) < 0.01
+    # Peaks tab: species colours, zoom in x and y, hover, click-to-lock
+    pk = w.peaks
+    pk.load_U(pk.ulist.currentRow())
+    i = 3
+    pk.table.selectRow(i)
+    app.processEvents()
+    r = pk.s.fits.iloc[i]
+    full_y = (pk.s.y.min(), pk.s.y.max())
+    lo, hi = pk.ax.get_ylim()
+    assert hi - lo < 0.8 * (full_y[1] - full_y[0])             # y follows the zoom
+    pk.canvas.draw()
+    x, y = pk.ax.transData.transform((r.TOF * 1e6, r.B))
+    pk.on_hover(MouseEvent("motion_notify_event", pk.canvas, x, y))
+    assert pk._hover.get_visible() and pk._hover.get_text().startswith("Nb")
+    pk.mode.setCurrentIndex(1)                                # lock the peak position
+    pk.on_click(MouseEvent("button_press_event", pk.canvas, x, y, button=1))
+    assert pk.s.fits.iloc[i].locked == "μ"
+    pk.mode.setCurrentIndex(2)                                # lock the background
+    pk.on_click(MouseEvent("button_press_event", pk.canvas, x, y, button=1))
+    assert pk.s.fits.iloc[i].locked == "μB"
+    assert pk.table.item(i, pk.COLS.index("locked")).text() == "μB"
+    pk.unlock()
+    assert pk.s.fits.iloc[i].locked == ""
     w.close()

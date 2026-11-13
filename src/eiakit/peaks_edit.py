@@ -5,6 +5,7 @@ Peak picker (replaces the per-voltage work of untitled28):
     s = PeakSession.load(db, run, data_root, U)      # raw SEM shots of one voltage
     s.refit(corr=0.0)                                # every line of the mass list, file U
     s.set_center(i, t_s) / s.exclude(i, True)        # move a fit window / drop a line
+    s.lock_mu(i, t_s) / s.lock_B(i, volts) / s.unlock(i)   # hand-set peak position / background
     s.save(fits_root)        # fits/<run>/peaks/p<U>.txt (Output columns) + _detail.txt
 The fit uses the file voltage (no arrow clicks, N16), the LOF of the database, the run's
 mass list (labels and z max from its Output rows) and keeps all shot fits (N12).
@@ -26,7 +27,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .peaks import average_repeats, fit_peak, gui_lof, gui_voltage, predicted_tof
+from .peaks import average_repeats, fit_peak_locked, gui_lof, gui_voltage, predicted_tof
 
 
 def _ustr(U: float) -> str:
@@ -75,6 +76,7 @@ class PeakSession:
     excluded: set = field(default_factory=set)
     corr: float = 0.0
     fits: pd.DataFrame | None = None
+    locks: dict = field(default_factory=dict)        # (label, z) -> {"mu": s, "B": V}
 
     @classmethod
     def voltages(cls, run, data_root) -> list[float]:
@@ -145,6 +147,8 @@ class PeakSession:
         self.corr = float(m.get("corr", 0.0))
         self.k = float(m.get("auto_centre_k", self.k))
         self.centers = {int(i): float(t) for i, t in m.get("centers_s", {}).items()}
+        self.locks = {(int(a), int(b)): {k: float(v) for k, v in d.items()}
+                      for a, b, d in m.get("locks", [])}
         ex = {tuple(x) for x in m.get("excluded", [])}
         self.excluded = {i for i, (_, lab, z) in enumerate(self.lines) if (lab, z) in ex}
         self.refit()
@@ -173,10 +177,80 @@ class PeakSession:
         self.k = self.k_auto if on else 1.0
         self.refit()
 
-    def t0(self, i) -> float:
+    def predicted(self, i) -> float:
         m_amu, _, z = self.lines[i]
-        return self.centers.get(i, predicted_tof(m_amu, z, self.U_used, self.L_used,
-                                                 self.run.eia, self.profile) * self.k)
+        return predicted_tof(m_amu, z, self.U_used, self.L_used, self.run.eia,
+                             self.profile) * self.k
+
+    def t0(self, i) -> float:
+        """Window centre: moved by hand, else the locked peak position, else predicted."""
+        if i in self.centers:
+            return self.centers[i]
+        mu = self.lock(i).get("mu")
+        return mu if mu is not None else self.predicted(i)
+
+    # ---------------------------------------------------------------- hand locks
+    def key(self, i) -> tuple[int, int]:
+        return int(self.lines[i][1]), int(self.lines[i][2])
+
+    def lock(self, i) -> dict:
+        return self.locks.get(self.key(i), {})
+
+    def lock_mu(self, i, t_s: float | None):
+        """Peak position of line i fixed at t_s (None: free again); A, sigma (and B unless
+        locked) are fitted around it."""
+        self._set_lock(i, "mu", t_s)
+
+    def lock_B(self, i, volts: float | None):
+        """Background (baseline) of line i fixed at volts (None: free again)."""
+        self._set_lock(i, "B", volts)
+
+    def unlock(self, i):
+        self.locks.pop(self.key(i), None)
+        self.refit()
+
+    def _set_lock(self, i, what, v):
+        d = dict(self.lock(i))
+        if v is None:
+            d.pop(what, None)
+        else:
+            d[what] = float(v)
+        if d:
+            self.locks[self.key(i)] = d
+        else:
+            self.locks.pop(self.key(i), None)
+        self.refit()
+
+    def species(self, i) -> str:
+        """Species of line i, from the mass label (species.toml data_labels)."""
+        lab = self.lines[i][1]
+        for name, sp in self.db.species.items():
+            if lab in sp.data_labels or lab == sp.file_label:
+                return name
+        return str(lab)
+
+    def info(self, i) -> str:
+        """Text for the hover label of line i."""
+        r = self.fits.iloc[i]
+        m_amu, lab, z = self.lines[i]
+        sp = self.species(i)
+        lk = self.lock(i)
+        out = [f"{sp}{z}+  (m {lab}, z {z}, m/z {m_amu / z:.3g})",
+               f"expected t {self.predicted(i) * 1e6:.4f} µs, window centre {r.t0 * 1e6:.4f} µs"]
+        if r.success:
+            dev = (r.TOF / self.predicted(i) - 1) * 100
+            out += [f"fit TOF {r.TOF * 1e6:.4f} µs ({dev:+.2f} % from expected)",
+                    f"Yield {r.Yield:.4g} V, σ {r.sigma * 1e9:.3g} ns, B {r.B:.4g} V"]
+        else:
+            out.append("fit failed")
+        if lk:
+            out.append("locked: " + ", ".join(
+                f"μ {v * 1e6:.4f} µs" if k == "mu" else f"B {v:.4g} V" for k, v in lk.items()))
+        if r.get("at_edge"):
+            out.append("at the edge of the ± search")
+        if r.excluded:
+            out.append("EXCLUDED")
+        return "\n".join(out)
 
     def refit(self, corr: float | None = None):
         if corr is not None:
@@ -185,11 +259,15 @@ class PeakSession:
         reps = sorted(self.traces)
         for i, (_m_amu, label, z) in enumerate(self.lines):
             t0 = self.t0(i)
-            f = fit_peak(self.tof, self.y, t0, self.corr, self.settings.get("window_frac", 0.02),
-                         self.settings.get("mu_bound_s", 150e-9),
-                         self.settings.get("min_points", 1))
+            lk = self.lock(i)
+            f = fit_peak_locked(self.tof, self.y, t0, self.corr,
+                                self.settings.get("window_frac", 0.02),
+                                self.settings.get("mu_bound_s", 150e-9),
+                                self.settings.get("min_points", 1), lk.get("mu"), lk.get("B"))
             row = {"i": i, "m": label, "z": z, "t0": t0, "TOF": f["mu"], "Yield": f["A"],
                    "sigma": f["sigma"], "B": f["B"], "success": bool(f["success"]),
+                   "win_lo": f["win_lo"], "win_hi": f["win_hi"],
+                   "locked": "".join(x for x, k in (("μ", "mu"), ("B", "B")) if k in lk),
                    "at_edge": bool(f["success"] and f.get("mu_at_bound", False)),
                    "excluded": i in self.excluded}
             if f["success"]:
@@ -234,6 +312,7 @@ class PeakSession:
                 "lof_clicks": self.lof_clicks, "LOF_windows": self.L_used,
                 "auto_centre_k": self.k,
                 "excluded": [list(self.lines[i][1:]) for i in sorted(self.excluded)],
+                "locks": [[a, b, d] for (a, b), d in sorted(self.locks.items())],
                 "files": len(self.traces)}
         (d / f"p{_ustr(self.U)}.json").write_text(json.dumps(meta, indent=1, default=str),
                                                   encoding="utf-8")

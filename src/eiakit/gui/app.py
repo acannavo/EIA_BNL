@@ -69,6 +69,16 @@ from ..paths import get_paths
 STATE_COLOR = {"ok": "#c8e6c9", "stale": "#ffe0b2", "missing": "#eeeeee", "failed": "#ffcdd2"}
 LABEL_COLOR = {"ultra_fast": "#9467bd", "fast": "#d62728", "slow": "#1f77b4",
                "component_4": "#8c564b"}
+# Peaks tab: one colour per species (others: the matplotlib cycle, stable per name)
+SPECIES_COLOR = {"Al": "#1f77b4", "Nb": "#2ca02c", "H": "#d62728", "C": "#9467bd",
+                 "O": "#ff7f0e"}
+
+
+def species_color(sp: str) -> str:
+    if sp in SPECIES_COLOR:
+        return SPECIES_COLOR[sp]
+    cyc = ["#8c564b", "#e377c2", "#17becf", "#bcbd22", "#7f7f7f"]
+    return cyc[sum(map(ord, sp)) % len(cyc)]
 
 
 def _mj(run) -> str:
@@ -912,8 +922,9 @@ class FitterTab(QWidget):
 # --------------------------------------------------------------------- peak picker
 
 class PeaksTab(QWidget):
-    COLS = ["m", "z", "t0 [µs]", "TOF [µs]", "Yield [V]", "σ [ns]", "ok", "excluded",
-            "ref. TOF [µs]", "ref. Yield [V]"]
+    COLS = ["species", "m", "z", "t0 [µs]", "TOF [µs]", "Yield [V]", "σ [ns]", "B [V]", "ok",
+            "locked", "excluded", "ref. TOF [µs]", "ref. Yield [V]"]
+    MODES = ["window centre", "peak position (lock μ)", "background level (lock B)"]
 
     def __init__(self, win):
         super().__init__()
@@ -972,6 +983,8 @@ class PeaksTab(QWidget):
         self.ax = self.fig.subplots()
         self.canvas = FigureCanvasQTAgg(self.fig)
         self.canvas.mpl_connect("button_press_event", self.on_click)
+        self.canvas.mpl_connect("motion_notify_event", self.on_hover)
+        self._hover = None
         self.toolbar = NavigationToolbar2QT(self.canvas, self)
         right.addWidget(self.toolbar)
         right.addWidget(self.canvas, 3)
@@ -988,16 +1001,34 @@ class PeaksTab(QWidget):
                   _btn("Refit", self.refit, "fit every line at the file voltage (+ Corr)"),
                   _btn("Exclude / include line", self.toggle),
                   _btn("Reset window centre", self.reset),
+                  _btn("Unlock line", self.unlock,
+                       "free the hand-set peak position and background of the selected "
+                       "line again (the fit finds them)"),
                   _btn("Save voltage", self.save,
                        "fits/<run>/peaks/p<U>.txt: replaces this voltage's Output rows in "
                        "the calibration")):
             row.addWidget(b)
         row.addStretch()
         right.addLayout(row)
-        right.addWidget(QLabel("Orange rows: the fit ended at the edge of its ± 150 ns search "
-                               "(missed peak or no peak). Select the row, click on the real "
-                               "peak (new window centre, refit), or Exclude the line; then "
-                               "Save voltage."))
+        mrow = QHBoxLayout()
+        mrow.addWidget(QLabel("Click on the plot sets:"))
+        self.mode = QComboBox()
+        self.mode.addItems(self.MODES)
+        self.mode.setToolTip(
+            "window centre: the fit window moves there, everything is fitted again\n"
+            "peak position (lock μ): the peak is fixed at the clicked time; depth and width "
+            "are fitted around it\n"
+            "background level (lock B): the baseline is fixed at the clicked height\n"
+            "Both locks together: only depth and width are fitted. Locks are saved with "
+            "the voltage.")
+        mrow.addWidget(self.mode)
+        mrow.addStretch()
+        right.addLayout(mrow)
+        right.addWidget(QLabel(
+            "Orange rows: the fit ended at the edge of its ± 150 ns search (missed peak or "
+            "no peak). Select the row (or click a peak in the full spectrum), then click the "
+            "real peak / background with the mode above, or Exclude the line; then Save "
+            "voltage. Hover a line for its details."))
         rw = QWidget()
         rw.setLayout(right)
         lay.addWidget(rw, 1)
@@ -1092,10 +1123,11 @@ class PeaksTab(QWidget):
         self.table.setRowCount(len(f))
         for r, rec in enumerate(f.to_dict("records")):
             lt, ly = li.get((int(rec["m"]), int(rec["z"])), (np.nan, np.nan))
-            vals = [rec["m"], rec["z"], rec["t0"] * 1e6, rec["TOF"] * 1e6, rec["Yield"],
-                    rec["sigma"] * 1e9,
+            sp = s.species(r)
+            vals = [f"{sp}{int(rec['z'])}+", rec["m"], rec["z"], rec["t0"] * 1e6,
+                    rec["TOF"] * 1e6, rec["Yield"], rec["sigma"] * 1e9, rec["B"],
                     ("at edge" if rec.get("at_edge") else "yes") if rec["success"] else "no",
-                    "yes" if rec["excluded"] else "", lt * 1e6, ly]
+                    rec.get("locked", ""), "yes" if rec["excluded"] else "", lt * 1e6, ly]
             for c, v in enumerate(vals):
                 txt = v if isinstance(v, str) else ("" if not np.isfinite(v) else f"{v:.6g}")
                 it = QTableWidgetItem(txt)
@@ -1103,6 +1135,8 @@ class PeaksTab(QWidget):
                     it.setForeground(QColor("#999999"))
                 elif rec.get("at_edge") or not rec["success"]:
                     it.setBackground(QColor("#ffe0b2"))
+                if c == 0 and not rec["excluded"]:
+                    it.setForeground(QColor(species_color(sp)))
                 self.table.setItem(r, c, it)
         self.table.blockSignals(False)
         self.table.resizeColumnsToContents()
@@ -1115,37 +1149,122 @@ class PeaksTab(QWidget):
         ax.clear()
         ax.plot(s.tof * 1e6, s.y, color="0.35", lw=0.8, label=f"average of {len(s.traces)} shots")
         sel = self.sel()
+        seen = set()
         for i, r in enumerate(s.fits.itertuples()):
-            col = LABEL_COLOR["fast"] if i == sel else ("#bbbbbb" if r.excluded else "#1f77b4")
-            ax.axvline(r.t0 * 1e6, color=col, ls=":", lw=0.8)
+            sp = s.species(i)
+            col = "#bbbbbb" if r.excluded else species_color(sp)
+            ax.axvline(r.t0 * 1e6, color=col, ls=":", lw=1.4 if i == sel else 0.7)
             g = s.gaussian(i)
             if g is not None and not r.excluded:
                 w = np.abs(s.tof - r.TOF) < 5 * r.sigma
-                ax.plot(s.tof[w] * 1e6, g[w], color=col, lw=2 if i == sel else 1.2)
+                ax.plot(s.tof[w] * 1e6, g[w], color=col, lw=2.4 if i == sel else 1.2,
+                        label=sp if sp not in seen else None)
+                seen.add(sp)
         for k, t_leg in enumerate(s.legacy.TOF if len(s.legacy) else []):
-            ax.axvline(t_leg * 1e6, ymax=0.08, color="#ff7f0e", lw=2,
+            ax.axvline(t_leg * 1e6, ymax=0.08, color="0.2", lw=2,
                        label=("pipeline fit" if s.run.is_new else "untitled28 fit")
                        + " position" if k == 0 else None)
         ts = s.fits.t0
         ax.set_xlim(ts.min() * 0.9e6, ts.max() * 1.1e6)
         if sel is not None:
-            r = s.fits.iloc[sel]
-            ax.set_xlim(r.t0 * 0.95e6, r.t0 * 1.05e6)
+            self._zoom(sel)
         ax.set_xlabel("t [µs]")
         ax.set_ylabel("SEM [V]")
         ax.set_title(f"{s.run.key}, U = {s.U:g} V (windows at {s.U_used:.6g} V, "
                      f"LOF {s.L_used:.6g} m), Corr {s.corr:g}")
-        ax.legend(fontsize=8)
+        ax.legend(fontsize=8, loc="lower right")
+        self._hover = ax.annotate("", (0, 0), xytext=(12, 12), textcoords="offset points",
+                                  fontsize=8, zorder=10, multialignment="left",
+                                  bbox={"boxstyle": "round", "fc": "lightyellow", "ec": "0.5"})
+        self._hover.set_visible(False)
         self.canvas.draw_idle()
 
-    def on_click(self, ev):
-        i = self.sel()
-        if self.s is None or i is None or ev.inaxes is not self.ax or ev.xdata is None \
-                or self.toolbar.mode:
+    def _zoom(self, i):
+        """Selected line: its window, locks, and both axes fitted to the peak."""
+        s, ax = self.s, self.ax
+        r = s.fits.iloc[i]
+        col = species_color(s.species(i))
+        x0, x1 = r.t0 * 0.95, r.t0 * 1.05
+        ax.set_xlim(x0 * 1e6, x1 * 1e6)
+        ax.axvspan(r.win_lo * 1e6, r.win_hi * 1e6, color=col, alpha=0.08, label="fit window")
+        lk = s.lock(i)
+        if "B" in lk:
+            ax.hlines(lk["B"], r.win_lo * 1e6, r.win_hi * 1e6, color=col, ls="--", lw=1.5,
+                      label="background (locked)")
+        if "mu" in lk:
+            ax.axvline(lk["mu"] * 1e6, color=col, ls="-.", lw=1.5, label="peak (locked)")
+        m = (s.tof >= x0) & (s.tof <= x1)
+        vals = [s.y[m]]
+        g = s.gaussian(i)
+        if g is not None:
+            vals.append(g[m])
+        if "B" in lk:
+            vals.append(np.array([lk["B"]]))
+        v = np.concatenate(vals)
+        v = v[np.isfinite(v)]
+        if len(v):
+            lo, hi = float(v.min()), float(v.max())
+            pad = 0.08 * (hi - lo) if hi > lo else max(abs(hi) * 0.05, 1e-6)
+            ax.set_ylim(lo - pad, hi + pad)
+
+    def _nearest_line(self, ev, px=8):
+        """Index of the line whose peak (fit TOF, else window centre) is within px pixels
+        of the mouse in x, or None."""
+        s = self.s
+        t = np.where(s.fits.success, s.fits.TOF, s.fits.t0).astype(float) * 1e6
+        xs = self.ax.transData.transform(np.column_stack([t, np.zeros_like(t)]))[:, 0]
+        d = np.abs(xs - ev.x)
+        j = int(np.nanargmin(d)) if np.isfinite(d).any() else None
+        return j if j is not None and d[j] < px else None
+
+    def on_hover(self, ev):
+        if self.s is None or self._hover is None:
             return
-        self.s.set_center(i, ev.xdata * 1e-6)
+        j = self._nearest_line(ev) if ev.inaxes is self.ax and ev.xdata is not None else None
+        if j is not None:
+            r = self.s.fits.iloc[j]
+            x = (r.TOF if r.success else r.t0) * 1e6
+            right = ev.x > self.canvas.width() * 0.55 * self.canvas.device_pixel_ratio
+            self._hover.xy = (x, ev.ydata)
+            self._hover.set_text(self.s.info(j))
+            self._hover.set_position((-12, 12) if right else (12, 12))
+            self._hover.set_ha("right" if right else "left")
+            self._hover.set_visible(True)
+            self.canvas.draw_idle()
+        elif self._hover.get_visible():
+            self._hover.set_visible(False)
+            self.canvas.draw_idle()
+
+    def on_click(self, ev):
+        if self.s is None or ev.inaxes is not self.ax or ev.xdata is None or self.toolbar.mode:
+            return
+        i = self.sel()
+        if i is None:                                  # full spectrum: pick the line
+            j = self._nearest_line(ev)
+            if j is not None:
+                self.table.selectRow(j)
+            return
+        mode = self.mode.currentIndex()
+        if mode == 0:
+            self.s.set_center(i, ev.xdata * 1e-6)
+        elif mode == 1:
+            self.s.lock_mu(i, ev.xdata * 1e-6)
+        else:
+            self.s.lock_B(i, ev.ydata)
+        r = self.s.fits.iloc[i]
+        self.win.log.appendPlainText(
+            f"U = {self.s.U:g} V, {self.s.species(i)}{int(r.z)}+: {self.MODES[mode]} -> "
+            f"TOF {r.TOF * 1e6:.4f} µs, Yield {r.Yield:.4g} V, B {r.B:.4g} V"
+            + (f" (locked {r.locked})" if r.locked else ""))
         self.show_table()
         self.table.selectRow(i)
+
+    def unlock(self):
+        i = self.sel()
+        if self.s and i is not None:
+            self.s.unlock(i)
+            self.show_table()
+            self.table.selectRow(i)
 
     def refit(self):
         if self.s:

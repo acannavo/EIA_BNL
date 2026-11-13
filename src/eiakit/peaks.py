@@ -93,6 +93,67 @@ def fit_peak(tof, y, t0: float, corr: float = 0.0, window_frac: float = 0.02,
     return res
 
 
+def fit_peak_locked(tof, y, t0: float, corr: float = 0.0, window_frac: float = 0.02,
+                    mu_bound_s: float = 150e-9, min_points: int = 1,
+                    mu: float | None = None, B: float | None = None) -> dict:
+    """fit_peak with the peak position mu and/or the background B fixed by hand (Peaks
+    tab). mu fixed: scan of sigma (window up to the fit_peak bound), A (and B if free)
+    solved by least squares at each sigma, A <= 0 - never fails while the window has
+    points. Only B fixed: bounded fit of A, mu, sigma as fit_peak. Same keys as fit_peak,
+    plus mu_locked / B_locked."""
+    if mu is None and B is None:
+        return {**fit_peak(tof, y, t0, corr, window_frac, mu_bound_s, min_points),
+                "mu_locked": False, "B_locked": False}
+    half = t0 * (window_frac + corr)
+    lo, hi = t0 - half, t0 + half
+    mask = (tof >= lo) & (tof <= hi)
+    x, yy = tof[mask], y[mask]
+    res = {"t0": t0, "win_lo": lo, "win_hi": hi, "n_points": int(mask.sum()),
+           "A": np.nan, "mu": np.nan, "sigma": np.nan, "B": np.nan, "success": False,
+           "A_at_bound": False, "sigma_at_bound": False, "mu_at_bound": False,
+           "mu_locked": mu is not None, "B_locked": B is not None}
+    if len(x) < max(min_points, 3):
+        res["reason"] = "too few points"
+        return res
+    sig_hi = (hi - lo) / 6
+    if mu is not None:
+        dt = float(np.median(np.diff(x)))
+        sig = np.geomspace(max(dt / 2, sig_hi / 500), sig_hi, 400)
+        G = np.exp(-0.5 * ((x[None, :] - mu) / sig[:, None]) ** 2)
+        if B is not None:
+            A = np.minimum((G * (yy - B)).sum(1) / (G * G).sum(1), 0.0)
+            Bs = np.full_like(A, B)
+        else:
+            n, sg, sgg = len(x), G.sum(1), (G * G).sum(1)
+            sy, sgy = yy.sum(), (G * yy).sum(1)
+            det = n * sgg - sg * sg
+            A = np.where(det > 0, (n * sgy - sg * sy) / np.where(det > 0, det, 1), 0.0)
+            A = np.minimum(A, 0.0)
+            Bs = (sy - A * sg) / n
+        chi = ((yy[None, :] - A[:, None] * G - Bs[:, None]) ** 2).sum(1)
+        j = int(np.argmin(chi))
+        res.update(A=float(A[j]), mu=float(mu), sigma=float(sig[j]), B=float(Bs[j]),
+                   success=True, sigma_at_bound=bool(j == len(sig) - 1))
+        return res
+    # only the background fixed
+    A_guess = -abs(float(np.min(yy)) - B) or -1e-12
+    try:
+        with warnings.catch_warnings(), np.errstate(all="ignore"):
+            warnings.simplefilter("ignore", RuntimeWarning)
+            popt, _ = curve_fit(lambda t, a, m, s: gaussian(t, a, m, s, B), x, yy,
+                                p0=(A_guess, t0, sig_hi / 2),
+                                bounds=([1.5 * A_guess, t0 - mu_bound_s, 0],
+                                        [0, t0 + mu_bound_s, sig_hi]))
+    except (RuntimeError, ValueError, TypeError) as exc:
+        res["reason"] = f"fit failed: {exc}"
+        return res
+    A, m, s = (float(v) for v in popt)
+    res.update(A=A, mu=m, sigma=s, B=float(B), success=True,
+               sigma_at_bound=bool(np.isclose(s, sig_hi, rtol=1e-6)),
+               mu_at_bound=bool(abs(abs(m - t0) - mu_bound_s) < 1e-12))
+    return res
+
+
 def fit_voltage(traces_by_rep: dict[int, tuple], U: float, lines: list[tuple[float, int, int]],
                 L_m: float, eia, profile, settings: dict, corr: float = 0.0,
                 n_points: int | None = None) -> pd.DataFrame:
