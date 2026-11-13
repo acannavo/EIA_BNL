@@ -529,9 +529,7 @@ class FitterTab(QWidget):
                        "replace the components of this z by ones proposed from the peaks of "
                        "its J_z(t) (labelled by arrival time), then Fit each"),
                   _btn("Seed all z", self.seed_all, "Seed every z that has no component yet"),
-                  _btn("Lock / unlock", self.toggle_lock,
-                       "locked: Fit and Seed leave this component as you set it (sliders, "
-                       "typed values); it still counts when the others are fitted"),
+                  self._lock_btn(),
                   _btn("Full spectrum", self.full, "whole time range (also Esc)"),
                   _btn("Save to store", self.save,
                        "fits/<run>/cbs_fit.json (previous version kept)")):
@@ -594,9 +592,11 @@ class FitterTab(QWidget):
         tab = self.s.table(z)
         self.table.setRowCount(len(tab))
         for r, rec in enumerate(tab.to_dict("records")):
-            vals = [rec["label"], rec["t_peak_us"], rec["FWHM_us"], rec["kT_eV"], rec["V0_V"],
+            lk = self.s.locked(z, r)
+            vals = [rec["label"] + ("  🔒" if lk else ""), rec["t_peak_us"], rec["FWHM_us"],
+                    rec["kT_eV"], rec["V0_V"],
                     rec["A"], rec["u_kms"], rec["t_peak_fit_us"], rec["FWHM_fit_us"],
-                    "locked" if self.s.locked(z, r) else ""]
+                    "locked" if lk else ""]
             for c, v in enumerate(vals):
                 txt = v if isinstance(v, str) else ("" if v is None or not np.isfinite(v)
                                                     else f"{v:.6g}")
@@ -633,7 +633,9 @@ class FitterTab(QWidget):
             col = LABEL_COLOR.get(c.extra.get("label"), "#8c564b")
             if y is not None:
                 ax.plot(t, y, color=col, lw=2.5 if i == sel else 1.5,
-                        label=c.extra.get("label"))
+                        ls="-" if not c.extra.get("locked") else (0, (6, 2)),
+                        label=c.extra.get("label") + (" (locked)" if c.extra.get("locked")
+                                                      else ""))
             if c.t_peak:
                 ax.axvline(c.t_peak, color=col, ls=":", lw=1)
             if i == sel and c.t_peak:
@@ -679,6 +681,7 @@ class FitterTab(QWidget):
     def row_changed(self):
         self._full = False
         self._base = None
+        self.update_lock_btn()
         self.draw()
 
     def grab_base(self):
@@ -725,12 +728,33 @@ class FitterTab(QWidget):
         if r is not None:
             self.table.selectRow(r)
 
+    def _lock_btn(self):
+        self.lock_btn = _btn("Lock", self.toggle_lock,
+                             "locked: Fit and Seed leave this component as you set it "
+                             "(sliders, typed values); it still counts when the others are "
+                             "fitted. Select a component (table row) first.")
+        return self.lock_btn
+
+    def update_lock_btn(self):
+        z, i = self.z(), self.sel()
+        ok = self.s is not None and z is not None and i is not None
+        self.lock_btn.setEnabled(ok)
+        self.lock_btn.setText("Unlock" if ok and self.s.locked(z, i) else "Lock")
+
     def toggle_lock(self):
         z, i = self.z(), self.sel()
-        if z is not None and i is not None:
-            self.s.lock(z, i, not self.s.locked(z, i))
-            self._after()
-            self.table.selectRow(i)
+        if z is None or i is None:
+            QMessageBox.information(self, "Lock", "Select a component first: click its row "
+                                    "in the table.")
+            return
+        new = not self.s.locked(z, i)
+        self.s.lock(z, i, new)
+        lab = self.s.comps[z][i].extra.get("label")
+        self.win.log.appendPlainText(f"z = {z} {lab}: {'locked' if new else 'unlocked'}"
+                                     " (Save to store keeps it)")
+        self._after()
+        self.table.selectRow(i)
+        self.update_lock_btn()
 
     def full(self):
         self._full = True
@@ -766,7 +790,7 @@ class FitterTab(QWidget):
         txt = item.text().strip()
         try:
             if c == 0:
-                self.s.comps[z][r].extra["label"] = txt
+                self.s.comps[z][r].extra["label"] = txt.replace("🔒", "").strip()
                 self.s.dirty.add(z)
             else:
                 v = float(txt)
