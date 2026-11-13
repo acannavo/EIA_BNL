@@ -251,7 +251,8 @@ class CBSSession:
         self.dirty.add(z)
         return labels
 
-    def seed_all(self, only_empty: bool = True, min_frac: float = 1e-3, **kw) -> dict:
+    def seed_all(self, only_empty: bool = True, min_frac: float = 1e-3, log=None,
+                 **kw) -> dict:
         """seed() for every z with signal above min_frac of the strongest z (default: only
         the z without components). Returns {z: labels}."""
         peak = max((float(np.nanmax(v)) for v in self.curves.values()), default=0.0)
@@ -261,6 +262,8 @@ class CBSSession:
                 continue
             if z in self.curves and float(np.nanmax(self.curves[z])) >= min_frac * peak:
                 out[z] = self.seed(z, **kw)
+                if log:
+                    log(f"  z = {z}: {' + '.join(out[z]) or 'nothing'}")
         return out
 
     # ---------------------------------------------------------------- save

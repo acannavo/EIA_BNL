@@ -630,7 +630,9 @@ def cmd_cbs_seed(args) -> int:
             print(f"{run.key}: {e} (run 'eiakit run {run.key}' first)")
             rc = 1
             continue
-        r = s.seed_all(only_empty=not args.replace, fit=not args.no_fit)
+        print(f"{run.key}: seeding (peaks of every J_z(t), then Fit of each component)")
+        r = s.seed_all(only_empty=not args.replace, fit=not args.no_fit,
+                       log=lambda m: print(m, flush=True))
         if not r:
             print(f"{run.key}: nothing to seed (every z has components; --replace to redo)")
             continue

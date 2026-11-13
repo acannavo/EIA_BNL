@@ -184,6 +184,26 @@ class CBSModel:
             return 1e30
         return float(np.sum((resid[mask] - A * F[mask]) ** 2 / self.denom(resid[mask])))
 
+    def _scan(self, grid, u, z, resid, mask):
+        """chi2_residual for every kT of the grid, with the shape evaluated only inside the
+        window (same values element by element, ~30x faster than the full time grid)."""
+        if mask.sum() < 5:
+            return np.full(len(grid), 1e30)
+        tm, rm = self.tof[mask], resid[mask]
+        den = self.denom(rm)
+        out = np.full(len(grid), 1e30)
+        for j, k in enumerate(grid):
+            V0 = self.V0_from_u(k, u, z)
+            if V0 is None or V0 <= 0:
+                continue
+            F = self.shape(k, V0, z, tm)
+            d = np.sum(F ** 2 / den)
+            A = np.sum(rm * F / den) / d if d > 0 else np.nan
+            if np.isnan(A) or A <= 0:
+                continue
+            out[j] = float(np.sum((rm - A * F) ** 2 / den))
+        return out
+
     def residual(self, comps, i, curve, z):
         r = curve.copy()
         for j, c in enumerate(comps):
@@ -269,7 +289,7 @@ class CBSModel:
         for _ in range(n_iter or self.n_iter_sub):
             r = self.residual(comps, i, curve, z)
             m = self.mask(c)
-            x2 = np.array([self.chi2_residual(k, u, z, r, m) for k in grid])
+            x2 = self._scan(grid, u, z, r, m)
             j = int(np.nanargmin(x2))
             kT = float(grid[j])
             V0 = self.V0_from_u(kT, u, z)
