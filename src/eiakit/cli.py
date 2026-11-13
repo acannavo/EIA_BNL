@@ -670,7 +670,10 @@ def cmd_add_run(args) -> int:
     date = args.date or (f"{m[1]}-{m[2]}-{m[3]}" if m else _dt.date.today().isoformat())
     lab = db.pipeline["peaks"].get("new_runs", {}).get("labels", {}).get(tgt)
     labels = [int(lab)] if lab is not None else db.species[tgt].data_labels[:1]
-    species = like.spectra_species if like else [tgt, "H", "C", "O"]
+    # the run's own target first; the --like run's target dropped when it differs
+    # (an Al run copied from the Nb ps run must not fit Nb lines)
+    species = [tgt] + [x for x in (like.spectra_species if like else ["H", "C", "O"])
+                       if x != tgt and not (like and x == like.target)]
     rec = like.rec if like else None
     if args.energy is not None:
         laser = f"{{ energy_mJ = {args.energy} }}"
