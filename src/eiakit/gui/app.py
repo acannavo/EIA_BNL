@@ -816,7 +816,9 @@ class PeaksTab(QWidget):
         self.table.itemSelectionChanged.connect(self.draw)
         right.addWidget(self.table, 2)
         row = QHBoxLayout()
-        for b in (_btn("Refit", self.refit, "fit every line at the file voltage (+ Corr)"),
+        for b in (_btn("Full spectrum", self.full,
+                       "back to the whole trace (also: Esc, or click the selected row again)"),
+                  _btn("Refit", self.refit, "fit every line at the file voltage (+ Corr)"),
                   _btn("Exclude / include line", self.toggle),
                   _btn("Reset window centre", self.reset),
                   _btn("Save voltage", self.save,
@@ -885,6 +887,16 @@ class PeaksTab(QWidget):
     def sel(self):
         rows = {i.row() for i in self.table.selectedIndexes()}
         return min(rows) if rows else None
+
+    def full(self):
+        self.table.clearSelection()
+        self.draw()
+
+    def keyPressEvent(self, ev):
+        if ev.key() == Qt.Key_Escape:
+            self.full()
+        else:
+            super().keyPressEvent(ev)
 
     def clicks(self, u=None, lof=None):
         if self.s is None or self._loading:
@@ -991,8 +1003,10 @@ class PeaksTab(QWidget):
         if self.s is None:
             return
         p = self.s.save(self.win.paths.fits)
-        self.win.log.appendPlainText(f"voltage saved: {p}. 'Run' on the Runs tab rebuilds "
-                                     f"the calibration with it.")
+        self.win.log.appendPlainText(
+            f"voltage saved: {p}\n  It is used from the next run of {self.s.run.key}: Runs "
+            f"tab -> Run selected (the calibration line then lists "
+            f"'voltages_from_peaks_tab'). To undo: delete that file and run again.")
         r = self.ulist.currentRow()
         self.fill_U(self.run_box.currentText())
         self.ulist.setCurrentRow(r)
