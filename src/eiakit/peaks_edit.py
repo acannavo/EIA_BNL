@@ -6,6 +6,8 @@ Peak picker (replaces the per-voltage work of untitled28):
     s.refit(corr=0.0)                                # every line of the mass list, file U
     s.set_center(i, t_s) / s.exclude(i, True)        # move a fit window / drop a line
     s.lock_mu(i, t_s) / s.lock_B(i, volts) / s.unlock(i)   # hand-set peak position / background
+    s.set_common_bg((t1, v1), (t2, v2))   # one background for every line: horizontal at
+    s.add_tune(t, v) / s.remove_tune(t)   # the mean of 2 clicks, + local tuning points
     s.save(fits_root)        # fits/<run>/peaks/p<U>.txt (Output columns) + _detail.txt
 The fit uses the file voltage (no arrow clicks, N16), the LOF of the database, the run's
 mass list (labels and z max from its Output rows) and keeps all shot fits (N12).
@@ -77,6 +79,9 @@ class PeakSession:
     corr: float = 0.0
     fits: pd.DataFrame | None = None
     locks: dict = field(default_factory=dict)        # (label, z) -> {"mu": s, "B": V}
+    # common background of this voltage: None or {"pts": [(t, V), (t, V)], "tune":
+    # [(t, V)], "reach": frac, "on": bool}; a per-line B lock wins over it
+    bg: dict | None = None
 
     @classmethod
     def voltages(cls, run, data_root) -> list[float]:
@@ -149,6 +154,11 @@ class PeakSession:
         self.centers = {int(i): float(t) for i, t in m.get("centers_s", {}).items()}
         self.locks = {(int(a), int(b)): {k: float(v) for k, v in d.items()}
                       for a, b, d in m.get("locks", [])}
+        cb = m.get("common_bg")
+        self.bg = None if not cb else {"pts": [tuple(p) for p in cb["pts"]],
+                                       "tune": [tuple(p) for p in cb.get("tune", [])],
+                                       "reach": float(cb.get("reach", 0.03)),
+                                       "on": bool(cb.get("on", True))}
         ex = {tuple(x) for x in m.get("excluded", [])}
         self.excluded = {i for i, (_, lab, z) in enumerate(self.lines) if (lab, z) in ex}
         self.refit()
@@ -221,6 +231,80 @@ class PeakSession:
             self.locks.pop(self.key(i), None)
         self.refit()
 
+    # ------------------------------------------------------------ common background
+    @property
+    def bg_on(self) -> bool:
+        return bool(self.bg and self.bg.get("on", True))
+
+    def set_common_bg(self, p1, p2, reach: float | None = None):
+        """Common background from two clicked points (t s, V): horizontal at their mean,
+        for every line of this voltage. Tuning points are kept."""
+        old = self.bg or {}
+        self.bg = {"pts": [tuple(map(float, p1)), tuple(map(float, p2))],
+                   "tune": old.get("tune", []),
+                   "reach": float(reach if reach is not None else old.get("reach", 0.03)),
+                   "on": True}
+        self.refit()
+
+    def set_bg_on(self, on: bool):
+        if self.bg:
+            self.bg["on"] = bool(on)
+            self.refit()
+
+    def set_bg_reach(self, reach: float):
+        if self.bg:
+            self.bg["reach"] = float(reach)
+            self.refit()
+
+    def clear_common_bg(self):
+        self.bg = None
+        self.refit()
+
+    @property
+    def bg_level(self) -> float:
+        return float(np.mean([v for _, v in self.bg["pts"]]))
+
+    def add_tune(self, t: float, v: float):
+        """Tuning point: the background goes through (t, v); it changes only within
+        +/- reach x t of it (or up to the next tuning point, if closer)."""
+        if not self.bg:
+            raise ValueError("define the common background first (2 points)")
+        self.bg["tune"] = sorted([p for p in self.bg["tune"] if p[0] != t] +
+                                 [(float(t), float(v))])
+        self.refit()
+
+    def remove_tune(self, t: float) -> bool:
+        """Remove the tuning point nearest to t (s). False if there is none."""
+        if not self.bg or not self.bg["tune"]:
+            return False
+        j = int(np.argmin([abs(p[0] - t) for p in self.bg["tune"]]))
+        del self.bg["tune"][j]
+        self.refit()
+        return True
+
+    def bg_curve(self, t=None) -> np.ndarray | None:
+        """Common background on t (default: the tof grid): level + offsets of the tuning
+        points, linear between neighbours and back to the level within reach of each."""
+        if not self.bg:
+            return None
+        t = self.tof if t is None else np.asarray(t, float)
+        lvl, w = self.bg_level, self.bg.get("reach", 0.03)
+        tune = sorted(self.bg["tune"])
+        if not tune:
+            return np.full(t.shape, lvl)
+        xs, ds = [tune[0][0] * (1 - w)], [0.0]
+        for k, (tk, vk) in enumerate(tune):
+            xs.append(tk)
+            ds.append(vk - lvl)
+            nxt = tune[k + 1][0] if k + 1 < len(tune) else None
+            if nxt is None or nxt - tk > w * (tk + nxt):
+                xs.append(tk * (1 + w))
+                ds.append(0.0)
+                if nxt is not None:
+                    xs.append(nxt * (1 - w))
+                    ds.append(0.0)
+        return lvl + np.interp(t, xs, ds, left=0.0, right=0.0)
+
     def species(self, i) -> str:
         """Species of line i, from the mass label (species.toml data_labels)."""
         lab = self.lines[i][1]
@@ -243,6 +327,8 @@ class PeakSession:
                     f"Yield {r.Yield:.4g} V, σ {r.sigma * 1e9:.3g} ns, B {r.B:.4g} V"]
         else:
             out.append("fit failed")
+        if r.get("common_bg", False):
+            out.append("background: common (all lines)")
         if lk:
             out.append("locked: " + ", ".join(
                 f"μ {v * 1e6:.4f} µs" if k == "mu" else f"B {v:.4g} V" for k, v in lk.items()))
@@ -257,17 +343,22 @@ class PeakSession:
             self.corr = corr
         out = []
         reps = sorted(self.traces)
+        Bt = self.bg_curve() if self.bg_on else None
         for i, (_m_amu, label, z) in enumerate(self.lines):
             t0 = self.t0(i)
             lk = self.lock(i)
             f = fit_peak_locked(self.tof, self.y, t0, self.corr,
                                 self.settings.get("window_frac", 0.02),
                                 self.settings.get("mu_bound_s", 150e-9),
-                                self.settings.get("min_points", 1), lk.get("mu"), lk.get("B"))
+                                self.settings.get("min_points", 1), lk.get("mu"), lk.get("B"),
+                                Bt)
+            common = Bt is not None and "B" not in lk
             row = {"i": i, "m": label, "z": z, "t0": t0, "TOF": f["mu"], "Yield": f["A"],
                    "sigma": f["sigma"], "B": f["B"], "success": bool(f["success"]),
                    "win_lo": f["win_lo"], "win_hi": f["win_hi"],
-                   "locked": "".join(x for x, k in (("μ", "mu"), ("B", "B")) if k in lk),
+                   "locked": "".join(x for x, k in (("μ", "mu"), ("B", "B")) if k in lk)
+                   + ("Bc" if common else ""),
+                   "common_bg": common,
                    "at_edge": bool(f["success"] and f.get("mu_at_bound", False)),
                    "excluded": i in self.excluded}
             if f["success"]:
@@ -295,7 +386,8 @@ class PeakSession:
         t = self.tof if t is None else t
         if not r.success:
             return None
-        return r.Yield * np.exp(-0.5 * ((t - r.TOF) / r.sigma) ** 2) + r.B
+        B = self.bg_curve(t) if r.get("common_bg", False) else r.B
+        return r.Yield * np.exp(-0.5 * ((t - r.TOF) / r.sigma) ** 2) + B
 
     def save(self, fits_root, note: str = "") -> Path:
         ok = self.fits[self.fits.success & ~self.fits.excluded]
@@ -313,6 +405,7 @@ class PeakSession:
                 "auto_centre_k": self.k,
                 "excluded": [list(self.lines[i][1:]) for i in sorted(self.excluded)],
                 "locks": [[a, b, d] for (a, b), d in sorted(self.locks.items())],
+                "common_bg": self.bg,
                 "files": len(self.traces)}
         (d / f"p{_ustr(self.U)}.json").write_text(json.dumps(meta, indent=1, default=str),
                                                   encoding="utf-8")

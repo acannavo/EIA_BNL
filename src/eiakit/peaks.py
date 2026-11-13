@@ -61,8 +61,9 @@ def predicted_tof(m_amu: float, z: int, U: float, L_m: float, eia, profile) -> f
 
 def fit_peak(tof, y, t0: float, corr: float = 0.0, window_frac: float = 0.02,
              mu_bound_s: float = 150e-9, min_points: int = 1) -> dict:
-    """One bounded Gaussian fit around t0 (fit_gaussians_to_data of untitled28)."""
-    half = t0 * (window_frac + corr)
+    """One bounded Gaussian fit around t0 (fit_gaussians_to_data of untitled28).
+    corr may be negative (narrower window); the half width stays >= 0.1 % of t0."""
+    half = t0 * max(window_frac + corr, 1e-3)
     lo, hi = t0 - half, t0 + half
     mask = (tof >= lo) & (tof <= hi)
     x, yy = tof[mask], y[mask]
@@ -95,16 +96,25 @@ def fit_peak(tof, y, t0: float, corr: float = 0.0, window_frac: float = 0.02,
 
 def fit_peak_locked(tof, y, t0: float, corr: float = 0.0, window_frac: float = 0.02,
                     mu_bound_s: float = 150e-9, min_points: int = 1,
-                    mu: float | None = None, B: float | None = None) -> dict:
+                    mu: float | None = None, B: float | None = None,
+                    Bt: np.ndarray | None = None) -> dict:
     """fit_peak with the peak position mu and/or the background B fixed by hand (Peaks
     tab). mu fixed: scan of sigma (window up to the fit_peak bound), A (and B if free)
     solved by least squares at each sigma, A <= 0 - never fails while the window has
     points. Only B fixed: bounded fit of A, mu, sigma as fit_peak. Same keys as fit_peak,
-    plus mu_locked / B_locked."""
+    plus mu_locked / B_locked.
+    Bt: a background curve on the tof grid (common background of the voltage), used as
+    a fixed B(t) when B is None; the B reported is then B(t) at the peak."""
+    if Bt is not None and B is None:
+        r = fit_peak_locked(tof, y - Bt, t0, corr, window_frac, mu_bound_s, min_points,
+                            mu, 0.0)
+        if r["success"]:
+            r["B"] = float(np.interp(r["mu"], tof, Bt))
+        return r
     if mu is None and B is None:
         return {**fit_peak(tof, y, t0, corr, window_frac, mu_bound_s, min_points),
                 "mu_locked": False, "B_locked": False}
-    half = t0 * (window_frac + corr)
+    half = t0 * max(window_frac + corr, 1e-3)
     lo, hi = t0 - half, t0 + half
     mask = (tof >= lo) & (tof <= hi)
     x, yy = tof[mask], y[mask]

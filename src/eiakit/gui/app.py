@@ -924,7 +924,10 @@ class FitterTab(QWidget):
 class PeaksTab(QWidget):
     COLS = ["species", "m", "z", "t0 [µs]", "TOF [µs]", "Yield [V]", "σ [ns]", "B [V]", "ok",
             "locked", "excluded", "ref. TOF [µs]", "ref. Yield [V]"]
-    MODES = ["window centre", "peak position (lock μ)", "background level (lock B)"]
+    MODES = ["window centre", "peak position (lock μ)", "background level (lock B)",
+             "common background: 2 points", "common background: add tuning point",
+             "common background: remove tuning point"]
+    BG_COLOR = "#8c564b"
 
     def __init__(self, win):
         super().__init__()
@@ -945,11 +948,37 @@ class PeaksTab(QWidget):
         self.all_lines.toggled.connect(lambda _: self.load_U(self.ulist.currentRow()))
         left.addWidget(self.all_lines)
         self.corr = QDoubleSpinBox()
-        self.corr.setRange(0, 0.1)
+        wf = float(win.db.pipeline["peaks"].get("window_frac", 0.02))
+        self.corr.setRange(-wf + 0.001, 0.1)
         self.corr.setSingleStep(0.005)
         self.corr.setDecimals(3)
-        self.corr.setPrefix("Corr (window +) ")
+        self.corr.setPrefix("Corr (window ±) ")
+        self.corr.setToolTip(f"added to the half window of every line ({wf:g} x t0): "
+                             f"positive widens, negative narrows (down to {0.001:g} x t0); "
+                             "press Refit")
         left.addWidget(self.corr)
+        gb = QGroupBox("Common background (all lines)")
+        gbl = QFormLayout(gb)
+        self.bg_use = QCheckBox("use it")
+        self.bg_use.setToolTip("every line is fitted on this background (a line's own "
+                               "locked B wins); define it with the click mode '2 points'")
+        self.bg_use.toggled.connect(self.bg_toggle)
+        self.bg_reach = QDoubleSpinBox()
+        self.bg_reach.setRange(0.2, 20)
+        self.bg_reach.setSingleStep(0.5)
+        self.bg_reach.setValue(3.0)
+        self.bg_reach.setSuffix(" % of t")
+        self.bg_reach.setToolTip("how far a tuning point bends the background on each side "
+                                 "(adjacent charge states are ~5 % apart)")
+        self.bg_reach.valueChanged.connect(self.bg_reach_changed)
+        self.bg_info = QLabel("not defined")
+        self.bg_info.setWordWrap(True)
+        gbl.addRow(self.bg_use)
+        gbl.addRow("tuning reach", self.bg_reach)
+        gbl.addRow(self.bg_info)
+        gbl.addRow(_btn("Clear common background", self.bg_clear))
+        left.addWidget(gb)
+        self._bg_click = None
         g = QGroupBox("Expected lines (as in untitled28)")
         gl = QFormLayout(g)
         self.uclk = QSpinBox()
@@ -1020,7 +1049,11 @@ class PeaksTab(QWidget):
             "are fitted around it\n"
             "background level (lock B): the baseline is fixed at the clicked height\n"
             "Both locks together: only depth and width are fitted. Locks are saved with "
-            "the voltage.")
+            "the voltage.\n"
+            "common background, 2 points: click 2 baseline points anywhere; a horizontal "
+            "line at their mean becomes the background of every line\n"
+            "add / remove tuning point: bends the common background locally through the "
+            "click (within the tuning reach) / removes the nearest tuning point")
         mrow.addWidget(self.mode)
         mrow.addStretch()
         right.addLayout(mrow)
@@ -1081,6 +1114,9 @@ class PeaksTab(QWidget):
         self.lclk.setValue(self.s.lof_clicks)
         self.corr.setValue(self.s.corr)
         self.auto.setChecked(self.s.k != 1.0 or not self.s.run.is_new)
+        self._bg_click = None
+        if self.s.bg:
+            self.bg_reach.setValue(self.s.bg.get("reach", 0.03) * 100)
         self._loading = False
         if saved:
             self.win.log.appendPlainText(f"U = {self.s.U:g} V: the saved fit (clicks "
@@ -1111,8 +1147,50 @@ class PeaksTab(QWidget):
         self.s.set_auto_centre(on)
         self.show_table()
 
+    def bg_sync(self):
+        s = self.s
+        self._loading = True
+        self.bg_use.setEnabled(bool(s.bg))
+        self.bg_use.setChecked(s.bg_on)
+        self._loading = False
+        if s.bg:
+            n = len(s.bg["tune"])
+            self.bg_info.setText(f"level {s.bg_level:.4g} V, {n} tuning point"
+                                 + ("s" if n != 1 else "") + ("" if s.bg_on else " (off)"))
+        else:
+            self.bg_info.setText("not defined: click mode 'common background: 2 points'")
+
+    def bg_toggle(self, on):
+        if self.s is None or self._loading:
+            return
+        i = self.sel()
+        self.s.set_bg_on(on)
+        self.show_table()
+        if i is not None:
+            self.table.selectRow(i)
+
+    def bg_reach_changed(self, v):
+        if self.s is None or self._loading or not self.s.bg:
+            return
+        i = self.sel()
+        self.s.set_bg_reach(v / 100)
+        self.show_table()
+        if i is not None:
+            self.table.selectRow(i)
+
+    def bg_clear(self):
+        if self.s is None:
+            return
+        i = self.sel()
+        self._bg_click = None
+        self.s.clear_common_bg()
+        self.show_table()
+        if i is not None:
+            self.table.selectRow(i)
+
     def show_table(self):
         s = self.s
+        self.bg_sync()
         self.uval.setText(f"U = {s.U_used:.6g} V (file {s.U:g} V)")
         self.lval.setText(f"LOF = {s.L_used:.6g} m (db {s.L_m:g} m)")
         self.auto.setEnabled(bool(s.run.is_new))
@@ -1160,6 +1238,18 @@ class PeaksTab(QWidget):
                 ax.plot(s.tof[w] * 1e6, g[w], color=col, lw=2.4 if i == sel else 1.2,
                         label=sp if sp not in seen else None)
                 seen.add(sp)
+        if s.bg:
+            ax.plot(s.tof * 1e6, s.bg_curve(), color=self.BG_COLOR, ls="--",
+                    lw=1.2 if s.bg_on else 0.8, alpha=1 if s.bg_on else 0.5,
+                    label="common background" + ("" if s.bg_on else " (off)"))
+            ax.plot([p[0] * 1e6 for p in s.bg["pts"]], [s.bg_level] * 2, "s", ms=6,
+                    color=self.BG_COLOR)
+            if s.bg["tune"]:
+                ax.plot([p[0] * 1e6 for p in s.bg["tune"]], [p[1] for p in s.bg["tune"]],
+                        "D", ms=6, mfc="white", color=self.BG_COLOR, label="tuning points")
+        if self._bg_click is not None:
+            ax.plot(self._bg_click[0] * 1e6, self._bg_click[1], "s", ms=7, mfc="white",
+                    color=self.BG_COLOR, label="1st background point")
         for k, t_leg in enumerate(s.legacy.TOF if len(s.legacy) else []):
             ax.axvline(t_leg * 1e6, ymax=0.08, color="0.2", lw=2,
                        label=("pipeline fit" if s.run.is_new else "untitled28 fit")
@@ -1200,6 +1290,8 @@ class PeaksTab(QWidget):
             vals.append(g[m])
         if "B" in lk:
             vals.append(np.array([lk["B"]]))
+        if s.bg_on:
+            vals.append(s.bg_curve(s.tof[m]))
         v = np.concatenate(vals)
         v = v[np.isfinite(v)]
         if len(v):
@@ -1239,12 +1331,17 @@ class PeaksTab(QWidget):
         if self.s is None or ev.inaxes is not self.ax or ev.xdata is None or self.toolbar.mode:
             return
         i = self.sel()
+        mode = self.mode.currentIndex()
+        if mode >= 3:
+            self.bg_click(mode, ev.xdata * 1e-6, ev.ydata)
+            if i is not None:
+                self.table.selectRow(i)
+            return
         if i is None:                                  # full spectrum: pick the line
             j = self._nearest_line(ev)
             if j is not None:
                 self.table.selectRow(j)
             return
-        mode = self.mode.currentIndex()
         if mode == 0:
             self.s.set_center(i, ev.xdata * 1e-6)
         elif mode == 1:
@@ -1258,6 +1355,39 @@ class PeaksTab(QWidget):
             + (f" (locked {r.locked})" if r.locked else ""))
         self.show_table()
         self.table.selectRow(i)
+
+    def bg_click(self, mode, t, v):
+        s, log = self.s, self.win.log.appendPlainText
+        if mode == 3:
+            if self._bg_click is None:
+                self._bg_click = (t, v)
+                log(f"common background: 1st point {t * 1e6:.3f} µs, {v:.4g} V; "
+                    "click the 2nd")
+                self.draw()
+                return
+            p1, self._bg_click = self._bg_click, None
+            s.set_common_bg(p1, (t, v), self.bg_reach.value() / 100)
+            log(f"common background: level {s.bg_level:.4g} V for every line (mean of the "
+                "2 points); refitted")
+        elif not s.bg:
+            QMessageBox.information(self, "Peaks", "Define the common background first: "
+                                    "click mode 'common background: 2 points'.")
+            return
+        elif mode == 4:
+            s.add_tune(t, v)
+            log(f"common background: tuning point {t * 1e6:.3f} µs, {v:.4g} V "
+                f"({v - s.bg_level:+.3g} V from the level)")
+        else:
+            xs = self.ax.transData.transform([(p[0] * 1e6, p[1]) for p in s.bg["tune"]]) \
+                if s.bg["tune"] else np.empty((0, 2))
+            ex, ey = self.ax.transData.transform((t * 1e6, v))
+            d = np.hypot(xs[:, 0] - ex, xs[:, 1] - ey) if len(xs) else np.array([])
+            if not len(d) or d.min() > 15:
+                log("common background: no tuning point under the click")
+                return
+            s.remove_tune(s.bg["tune"][int(np.argmin(d))][0])
+            log("common background: tuning point removed")
+        self.show_table()
 
     def unlock(self):
         i = self.sel()

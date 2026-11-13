@@ -75,4 +75,31 @@ def test_window_tabs_and_cbs_fitter(tmp_path, monkeypatch):
     assert pk.table.item(i, pk.COLS.index("locked")).text() == "μB"
     pk.unlock()
     assert pk.s.fits.iloc[i].locked == ""
+    # common background: 2 points, a tuning point, remove it; negative Corr
+    def click(t_us, v):
+        X, Y = pk.ax.transData.transform((t_us, v))
+        pk.on_click(MouseEvent("button_press_event", pk.canvas, X, Y, button=1))
+    pk.full()
+    pk.canvas.draw()
+    pk.mode.setCurrentIndex(3)
+    t1, t2 = pk.ax.get_xlim()
+    click(t1 + 0.2 * (t2 - t1), -0.002)
+    assert pk.s.bg is None and pk._bg_click is not None
+    click(t1 + 0.8 * (t2 - t1), -0.001)
+    assert pk.s.bg_on and abs(pk.s.bg_level + 0.0015) < 2e-4
+    assert pk.s.fits.locked.str.contains("Bc").all() and pk.bg_use.isChecked()
+    pk.mode.setCurrentIndex(4)
+    tt = r.TOF * 1e6
+    click(tt, -0.0005)
+    assert len(pk.s.bg["tune"]) == 1
+    pk.canvas.draw()
+    pk.mode.setCurrentIndex(5)
+    click(tt, -0.0005)
+    assert pk.s.bg["tune"] == []
+    pk.bg_use.setChecked(False)
+    assert not pk.s.fits.locked.str.contains("Bc").any()
+    pk.corr.setValue(-0.01)
+    pk.refit()
+    rr = pk.s.fits.iloc[i]
+    assert abs((rr.win_hi - rr.win_lo) / rr.t0 - 0.02) < 1e-6
     w.close()
