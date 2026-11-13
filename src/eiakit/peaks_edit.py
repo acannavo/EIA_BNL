@@ -26,7 +26,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .peaks import average_repeats, fit_peak, predicted_tof
+from .peaks import average_repeats, fit_peak, gui_lof, gui_voltage, predicted_tof
 
 
 def _ustr(U: float) -> str:
@@ -68,6 +68,9 @@ class PeakSession:
     profile: object
     settings: dict
     k: float = 1.0                   # window-centre factor (new runs: from the peaks stage)
+    k_auto: float = 1.0              # the stage's factor (auto centring on), kept to restore
+    u_clicks: int = 0                # untitled28 arrow clicks on U (+/- U/500 each)
+    lof_clicks: int = 0              # untitled28 arrow clicks on LOF (+/- LOF/100 each)
     centers: dict = field(default_factory=dict)      # i -> t0 override (s)
     excluded: set = field(default_factory=set)
     corr: float = 0.0
@@ -109,7 +112,8 @@ class PeakSession:
                 k = float(f.k.iloc[0]) if len(f) else 1.0
             prof = db.profile(db.profile_for(run, "peaks"))
             s = cls(db, run, U, tof, y, traces, new_run_lines(db, run),
-                    det[det.U == U] if len(det) else det, run.eia.L_m, prof, settings, k=k)
+                    det[det.U == U] if len(det) else det, run.eia.L_m, prof, settings, k=k,
+                    k_auto=k)
             s.refit()
             return s
         rows = read_output_folder(sem / "Output")
@@ -129,10 +133,33 @@ class PeakSession:
         s.refit()
         return s
 
+    @property
+    def U_used(self) -> float:
+        """U of the fit windows: the file voltage after the arrow clicks (untitled28)."""
+        return gui_voltage(self.U, self.u_clicks, self.settings.get("u_step_frac", 0.002))
+
+    @property
+    def L_used(self) -> float:
+        return gui_lof(self.L_m, self.lof_clicks, self.settings.get("lof_step_frac", 0.01))
+
+    def set_clicks(self, u_clicks: int | None = None, lof_clicks: int | None = None):
+        """Arrow clicks on U and LOF as in untitled28: every expected line moves; refit."""
+        if u_clicks is not None:
+            self.u_clicks = int(u_clicks)
+        if lof_clicks is not None:
+            self.lof_clicks = int(lof_clicks)
+        self.refit()
+
+    def set_auto_centre(self, on: bool):
+        """Automatic window centring of new runs on (factor k of the peaks stage) or off
+        (expected lines from U and LOF only, as in untitled28)."""
+        self.k = self.k_auto if on else 1.0
+        self.refit()
+
     def t0(self, i) -> float:
         m_amu, _, z = self.lines[i]
-        return self.centers.get(i, predicted_tof(m_amu, z, self.U, self.L_m, self.run.eia,
-                                                 self.profile) * self.k)
+        return self.centers.get(i, predicted_tof(m_amu, z, self.U_used, self.L_used,
+                                                 self.run.eia, self.profile) * self.k)
 
     def refit(self, corr: float | None = None):
         if corr is not None:
@@ -186,6 +213,9 @@ class PeakSession:
         ok[[c for c in cols if c in ok]].to_csv(d / f"p{_ustr(self.U)}_detail.txt", index=False)
         meta = {"U": self.U, "saved": time.strftime("%Y-%m-%d %H:%M:%S"), "note": note,
                 "L_m": self.L_m, "corr": self.corr, "centers_s": self.centers,
+                "u_clicks": self.u_clicks, "U_windows": self.U_used,
+                "lof_clicks": self.lof_clicks, "LOF_windows": self.L_used,
+                "auto_centre_k": self.k,
                 "excluded": [list(self.lines[i][1:]) for i in sorted(self.excluded)],
                 "files": len(self.traces)}
         (d / f"p{_ustr(self.U)}.json").write_text(json.dumps(meta, indent=1, default=str),

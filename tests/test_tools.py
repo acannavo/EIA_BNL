@@ -57,3 +57,19 @@ def test_legacy_pedestal_with_other_fc_sources(monkeypatch, tmp_path):
     assert "per trace" in b["info"]["baseline_method"]
     assert a["info"]["fc_peak_t_s"] > 1e-6 and not a["info"].get("fc_peak_warning")
     assert all(p > 0.02 for p in a["info"]["fc_per_shot_peak_V"])     # ion peaks, not pickup
+
+
+def test_peak_picker_u_clicks_reproduce_untitled28():
+    """20250611, U = 35 V was fitted with -7 arrow clicks on U (N16): same clicks, same fits."""
+    import numpy as np
+
+    from eiakit.db import load_database
+    from eiakit.peaks_edit import PeakSession
+    db = load_database()
+    s = PeakSession.load(db, db.run("20250611"), ROOT, 35.0)
+    s.set_clicks(u_clicks=-7)
+    assert abs(s.U_used - 34.51) < 1e-9
+    m = s.fits[s.fits.success].merge(s.legacy, on=["m", "z"], suffixes=("", "_leg"))
+    assert len(m) == len(s.legacy) and np.allclose(m.TOF, m.TOF_leg, rtol=1e-12)
+    s.set_clicks(lof_clicks=1)
+    assert abs(s.L_used / s.L_m - 1.01) < 1e-9

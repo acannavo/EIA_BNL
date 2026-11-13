@@ -50,6 +50,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QRadioButton,
+    QSpinBox,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -751,7 +752,7 @@ class PeaksTab(QWidget):
 
     def __init__(self, win):
         super().__init__()
-        self.win, self.s = win, None
+        self.win, self.s, self._loading = win, None, False
         lay = QHBoxLayout(self)
         left = QVBoxLayout()
         self.run_box = QComboBox()
@@ -771,6 +772,30 @@ class PeaksTab(QWidget):
         self.corr.setDecimals(3)
         self.corr.setPrefix("Corr (window +) ")
         left.addWidget(self.corr)
+        g = QGroupBox("Expected lines (as in untitled28)")
+        gl = QFormLayout(g)
+        self.uclk = QSpinBox()
+        self.uclk.setRange(-60, 60)
+        self.uclk.setToolTip("arrow clicks on U: each moves U by U/500 (0.2 %); all expected "
+                             "lines of this voltage move, then every line is refitted")
+        self.lclk = QSpinBox()
+        self.lclk.setRange(-30, 30)
+        self.lclk.setToolTip("arrow clicks on LOF: each moves LOF by LOF/100 (1 %)")
+        self.uval, self.lval = QLabel(), QLabel()
+        gl.addRow("U clicks", self.uclk)
+        gl.addRow("", self.uval)
+        gl.addRow("LOF clicks", self.lclk)
+        gl.addRow("", self.lval)
+        self.auto = QCheckBox("automatic centring (new runs)")
+        self.auto.setChecked(True)
+        self.auto.setToolTip("off: the expected lines come from U and LOF only, as in "
+                             "untitled28; on: corrected by the factor found from the "
+                             "strongest lines (peaks stage)")
+        gl.addRow(self.auto)
+        self.uclk.valueChanged.connect(lambda v: self.clicks(u=v))
+        self.lclk.valueChanged.connect(lambda v: self.clicks(lof=v))
+        self.auto.toggled.connect(self.auto_centre)
+        left.addWidget(g)
         lw = QWidget()
         lw.setLayout(left)
         lw.setMaximumWidth(260)
@@ -850,13 +875,37 @@ class PeaksTab(QWidget):
         except Exception as e:                         # noqa: BLE001 - shown to the user
             QMessageBox.warning(self, "Peaks", str(e))
             return
+        self._loading = True                           # new voltage: clicks back to 0
+        self.uclk.setValue(0)
+        self.lclk.setValue(0)
+        self.auto.setChecked(True)
+        self._loading = False
         self.show_table()
 
     def sel(self):
         rows = {i.row() for i in self.table.selectedIndexes()}
         return min(rows) if rows else None
 
+    def clicks(self, u=None, lof=None):
+        if self.s is None or self._loading:
+            return
+        i = self.sel()
+        self.s.set_clicks(u, lof)
+        self.show_table()
+        if i is not None:
+            self.table.selectRow(i)
+
+    def auto_centre(self, on):
+        if self.s is None or self._loading:
+            return
+        self.s.set_auto_centre(on)
+        self.show_table()
+
     def show_table(self):
+        s = self.s
+        self.uval.setText(f"U = {s.U_used:.6g} V (file {s.U:g} V)")
+        self.lval.setText(f"LOF = {s.L_used:.6g} m (db {s.L_m:g} m)")
+        self.auto.setEnabled(bool(s.run.is_new))
         f, leg = self.s.fits, self.s.legacy
         li = {(int(a), int(b)): (t, y) for a, b, t, y in
               zip(leg.m, leg.z, leg.TOF, leg.YieldAveFit, strict=True)} if len(leg) else {}
@@ -905,7 +954,8 @@ class PeaksTab(QWidget):
             ax.set_xlim(r.t0 * 0.95e6, r.t0 * 1.05e6)
         ax.set_xlabel("t [µs]")
         ax.set_ylabel("SEM [V]")
-        ax.set_title(f"{s.run.key}, U = {s.U:g} V, Corr {s.corr:g}")
+        ax.set_title(f"{s.run.key}, U = {s.U:g} V (windows at {s.U_used:.6g} V, "
+                     f"LOF {s.L_used:.6g} m), Corr {s.corr:g}")
         ax.legend(fontsize=8)
         self.canvas.draw_idle()
 

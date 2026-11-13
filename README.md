@@ -98,7 +98,7 @@ results and are ignored. Other folders (`Miscellaneous`, `LowStateCharge`,
 | Studies | figures of a study, method studies, snapshots and diffs; double-click a page to open it |
 | Settings | the switches of `db\pipeline.toml`; Compare one setting (`eiakit compare`) |
 | CBS fitter | per charge state on the current calibration: click the peak, Fit (kT scan), kT from FWHM, add / remove labelled components (fast, slow, ...), windows; Save writes `fits\<run>\cbs_fit.json` (old version kept), then Run updates the cbs and report stages |
-| Peaks | the raw SEM shots of one voltage: refit every line at the file voltage, move a window (click), drop a line; Save replaces that voltage's Output rows in the calibration |
+| Peaks | the raw SEM shots of one voltage: U and LOF arrow clicks as in untitled28 (U/500, LOF/100 per click; all expected lines move), automatic centring on/off (new runs), move one window (click), drop a line, Corr; Save replaces that voltage's rows in the calibration |
 | FC baseline | the FC average and its pre-trigger region; pick the pedestal per run (used with `fc_baseline = "picked"`) |
 
 Long actions run `eiakit ...` in the background; the output appears in the log at the
