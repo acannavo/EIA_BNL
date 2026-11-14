@@ -6,6 +6,8 @@ Peak picker (replaces the per-voltage work of untitled28):
     s.refit(corr=0.0)                                # every line of the mass list, file U
     s.set_center(i, t_s) / s.exclude(i, True)        # move a fit window / drop a line
     s.lock_mu(i, t_s) / s.lock_B(i, volts) / s.unlock(i)   # hand-set peak position / background
+    s.lock_peak(i, t_s, volts)            # dragged peak: position and height locked
+    s.overlaps()                          # lines that may be blended with others
     s.set_common_bg((t1, v1), (t2, v2))   # one background for every line: horizontal at
     s.add_tune(t, v) / s.remove_tune(t)   # the mean of 2 clicks, + local tuning points
     s.save(fits_root)        # fits/<run>/peaks/p<U>.txt (Output columns) + _detail.txt
@@ -211,6 +213,24 @@ class PeakSession:
         locked) are fitted around it."""
         self._set_lock(i, "mu", t_s)
 
+    def lock_peak(self, i, t_s: float, volts: float):
+        """Dragged peak: the bottom of line i at (t_s, volts). Position and height (depth
+        below the background) are locked; the background is the line's locked B, else the
+        common one, else the current fitted B, which is then locked too so the bottom
+        stays where it was put. Only sigma is fitted afterwards."""
+        lk = dict(self.lock(i))
+        if "B" in lk:
+            B = lk["B"]
+        elif self.bg_on:
+            B = float(self.bg_curve(np.array([t_s]))[0])
+        else:
+            r = self.fits.iloc[i]
+            B = float(r.B) if np.isfinite(r.B) else float(np.median(self.y))
+            lk["B"] = B
+        lk.update(mu=float(t_s), A=min(float(volts) - B, 0.0))
+        self.locks[self.key(i)] = lk
+        self.refit()
+
     def lock_B(self, i, volts: float | None):
         """Background (baseline) of line i fixed at volts (None: free again)."""
         self._set_lock(i, "B", volts)
@@ -330,13 +350,56 @@ class PeakSession:
         if r.get("common_bg", False):
             out.append("background: common (all lines)")
         if lk:
-            out.append("locked: " + ", ".join(
-                f"μ {v * 1e6:.4f} µs" if k == "mu" else f"B {v:.4g} V" for k, v in lk.items()))
+            fmt = {"mu": lambda v: f"μ {v * 1e6:.4f} µs", "A": lambda v: f"height {v:.4g} V",
+                   "B": lambda v: f"B {v:.4g} V"}
+            out.append("locked: " + ", ".join(fmt[k](v) for k, v in lk.items()))
+        ov = self.overlaps().get(i, [])
+        if ov:
+            out.append("overlap: " + ", ".join(
+                f"{'same time as' if kind == 'same' else 'near'} {name} "
+                f"({dt * 1e9:+.0f} ns)" for _, name, kind, dt in ov))
         if r.get("at_edge"):
             out.append("at the edge of the ± search")
         if r.excluded:
             out.append("EXCLUDED")
         return "\n".join(out)
+
+    def name(self, i) -> str:
+        return f"{self.species(i)}{int(self.lines[i][2])}+"
+
+    def sigma_rel(self) -> float:
+        """Typical peak width sigma / t of this voltage (median of the good fits)."""
+        f = self.fits
+        if f is None:
+            return 0.005
+        ok = f.success & ~f.excluded & ~f.at_edge & (f.sigma > 0)
+        v = (f.sigma[ok] / f.TOF[ok]).to_numpy(float)
+        return float(np.median(v)) if len(v) else 0.005
+
+    def overlaps(self) -> dict:
+        """{i: [(j, name_j, kind, t_j - t_i)]} from the expected times: kind 'same' when
+        the two lines are less than one typical sigma apart (cannot be separated: same
+        m/z within the resolution, e.g. Al9+ / C4+), 'near' when line j is inside line i's
+        fit window or within 2 sigma of it (its tail is in the fit, e.g. Al8+ / O5+)."""
+        n = len(self.lines)
+        t = np.array([self.predicted(i) for i in range(n)])
+        half = max(self.settings.get("window_frac", 0.02) + self.corr, 1e-3)
+        sr = self.sigma_rel()
+        out = {}
+        for i in range(n):
+            for j in range(n):
+                if i == j or j in self.excluded:
+                    continue
+                d = t[j] - t[i]
+                tm = max(t[i], t[j])                   # symmetric: both lines are affected
+                if abs(d) < sr * tm:
+                    kind = "same"
+                elif abs(d) < (half + 2 * sr) * tm:
+                    kind = "near"
+                else:
+                    continue
+                out.setdefault(i, []).append((j, self.name(j), kind, float(d)))
+        return out
 
     def refit(self, corr: float | None = None):
         if corr is not None:
@@ -351,12 +414,13 @@ class PeakSession:
                                 self.settings.get("window_frac", 0.02),
                                 self.settings.get("mu_bound_s", 150e-9),
                                 self.settings.get("min_points", 1), lk.get("mu"), lk.get("B"),
-                                Bt)
+                                Bt, lk.get("A"))
             common = Bt is not None and "B" not in lk
             row = {"i": i, "m": label, "z": z, "t0": t0, "TOF": f["mu"], "Yield": f["A"],
                    "sigma": f["sigma"], "B": f["B"], "success": bool(f["success"]),
                    "win_lo": f["win_lo"], "win_hi": f["win_hi"],
-                   "locked": "".join(x for x, k in (("μ", "mu"), ("B", "B")) if k in lk)
+                   "locked": "".join(x for x, k in (("μ", "mu"), ("h", "A"), ("B", "B"))
+                                     if k in lk)
                    + ("Bc" if common else ""),
                    "common_bg": common,
                    "at_edge": bool(f["success"] and f.get("mu_at_bound", False)),

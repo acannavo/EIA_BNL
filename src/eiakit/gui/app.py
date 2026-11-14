@@ -923,7 +923,7 @@ class FitterTab(QWidget):
 
 class PeaksTab(QWidget):
     COLS = ["species", "m", "z", "t0 [µs]", "TOF [µs]", "Yield [V]", "σ [ns]", "B [V]", "ok",
-            "locked", "excluded", "ref. TOF [µs]", "ref. Yield [V]"]
+            "locked", "overlap", "excluded", "ref. TOF [µs]", "ref. Yield [V]"]
     MODES = ["window centre", "peak position (lock μ)", "background level (lock B)",
              "common background: 2 points", "common background: add tuning point",
              "common background: remove tuning point"]
@@ -1013,6 +1013,8 @@ class PeaksTab(QWidget):
         self.canvas = FigureCanvasQTAgg(self.fig)
         self.canvas.mpl_connect("button_press_event", self.on_click)
         self.canvas.mpl_connect("motion_notify_event", self.on_hover)
+        self.canvas.mpl_connect("button_release_event", self.on_release)
+        self._drag = None
         self._hover = None
         self.toolbar = NavigationToolbar2QT(self.canvas, self)
         right.addWidget(self.toolbar)
@@ -1023,7 +1025,17 @@ class PeaksTab(QWidget):
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.itemSelectionChanged.connect(self.draw)
-        right.addWidget(self.table, 2)
+        tr = QHBoxLayout()
+        tr.addWidget(self.table, 3)
+        self.rfig = Figure(figsize=(5, 3), constrained_layout=True)
+        self.rax = self.rfig.subplots()
+        self.rcanvas = FigureCanvasQTAgg(self.rfig)
+        self.rcanvas.setMinimumWidth(380)
+        self.rcanvas.mpl_connect("button_press_event", self.recap_click)
+        self.rcanvas.mpl_connect("motion_notify_event", self.recap_hover)
+        self._rbars, self._rhover = [], None
+        tr.addWidget(self.rcanvas, 2)
+        right.addLayout(tr, 2)
         row = QHBoxLayout()
         for b in (_btn("Full spectrum", self.full,
                        "back to the whole trace (also: Esc, or click the selected row again)"),
@@ -1059,9 +1071,10 @@ class PeaksTab(QWidget):
         right.addLayout(mrow)
         right.addWidget(QLabel(
             "Orange rows: the fit ended at the edge of its ± 150 ns search (missed peak or "
-            "no peak). Select the row (or click a peak in the full spectrum), then click the "
-            "real peak / background with the mode above, or Exclude the line; then Save "
-            "voltage. Hover a line for its details."))
+            "no peak). Select the row (or click a peak in the full spectrum), then drag the "
+            "white circle to the real peak bottom (locks position and height), or click with "
+            "the mode above, or Exclude the line; then Save voltage. Right: heights by "
+            "species; hatched = may be blended with another line."))
         rw = QWidget()
         rw.setLayout(right)
         lay.addWidget(rw, 1)
@@ -1197,15 +1210,18 @@ class PeaksTab(QWidget):
         f, leg = self.s.fits, self.s.legacy
         li = {(int(a), int(b)): (t, y) for a, b, t, y in
               zip(leg.m, leg.z, leg.TOF, leg.YieldAveFit, strict=True)} if len(leg) else {}
+        ov = s.overlaps()
         self.table.blockSignals(True)
         self.table.setRowCount(len(f))
         for r, rec in enumerate(f.to_dict("records")):
+            ovt = ", ".join(("≡ " if kind == "same" else "~ ") + name
+                            for _, name, kind, _ in ov.get(r, []))
             lt, ly = li.get((int(rec["m"]), int(rec["z"])), (np.nan, np.nan))
             sp = s.species(r)
             vals = [f"{sp}{int(rec['z'])}+", rec["m"], rec["z"], rec["t0"] * 1e6,
                     rec["TOF"] * 1e6, rec["Yield"], rec["sigma"] * 1e9, rec["B"],
                     ("at edge" if rec.get("at_edge") else "yes") if rec["success"] else "no",
-                    rec.get("locked", ""), "yes" if rec["excluded"] else "", lt * 1e6, ly]
+                    rec.get("locked", ""), ovt, "yes" if rec["excluded"] else "", lt * 1e6, ly]
             for c, v in enumerate(vals):
                 txt = v if isinstance(v, str) else ("" if not np.isfinite(v) else f"{v:.6g}")
                 it = QTableWidgetItem(txt)
@@ -1215,6 +1231,10 @@ class PeaksTab(QWidget):
                     it.setBackground(QColor("#ffe0b2"))
                 if c == 0 and not rec["excluded"]:
                     it.setForeground(QColor(species_color(sp)))
+                if c == self.COLS.index("overlap") and ovt:
+                    same = "≡" in ovt
+                    it.setForeground(QColor("#c62828" if same else "#e65100"))
+                    it.setToolTip("≡ same time (cannot be separated); ~ inside the fit window")
                 self.table.setItem(r, c, it)
         self.table.blockSignals(False)
         self.table.resizeColumnsToContents()
@@ -1263,6 +1283,7 @@ class PeaksTab(QWidget):
         ax.set_title(f"{s.run.key}, U = {s.U:g} V (windows at {s.U_used:.6g} V, "
                      f"LOF {s.L_used:.6g} m), Corr {s.corr:g}")
         ax.legend(fontsize=8, loc="lower right")
+        self.draw_recap()
         self._hover = ax.annotate("", (0, 0), xytext=(12, 12), textcoords="offset points",
                                   fontsize=8, zorder=10, multialignment="left",
                                   bbox={"boxstyle": "round", "fc": "lightyellow", "ec": "0.5"})
@@ -1283,6 +1304,10 @@ class PeaksTab(QWidget):
                       label="background (locked)")
         if "mu" in lk:
             ax.axvline(lk["mu"] * 1e6, color=col, ls="-.", lw=1.5, label="peak (locked)")
+        if r.success:                                  # handle: drag to set the peak
+            ax.plot([r.TOF * 1e6], [r.Yield + r.B], "o", ms=8, mfc="white", color=col,
+                    zorder=5, label="drag: peak position + height"
+                    + (" (locked)" if "A" in lk else ""))
         m = (s.tof >= x0) & (s.tof <= x1)
         vals = [s.y[m]]
         g = s.gaussian(i)
@@ -1311,6 +1336,19 @@ class PeaksTab(QWidget):
 
     def on_hover(self, ev):
         if self.s is None or self._hover is None:
+            return
+        if self._drag is not None:                     # dragging a peak: live preview
+            if ev.inaxes is self.ax and ev.xdata is not None:
+                d, t = self._drag, ev.xdata * 1e-6
+                B = self._drag_B(d["i"], t)
+                A = min(ev.ydata - B, 0.0)
+                sg = d["sigma"]
+                tt = np.linspace(t - 5 * sg, t + 5 * sg, 200)
+                Bt = self.s.bg_curve(tt) if self.s.bg_on and "B" not in self.s.lock(d["i"]) \
+                    else B
+                d["line"].set_data(tt * 1e6, A * np.exp(-0.5 * ((tt - t) / sg) ** 2) + Bt)
+                d["dot"].set_data([ev.xdata], [B + A])
+                self.canvas.draw_idle()
             return
         j = self._nearest_line(ev) if ev.inaxes is self.ax and ev.xdata is not None else None
         if j is not None:
@@ -1342,6 +1380,16 @@ class PeaksTab(QWidget):
             if j is not None:
                 self.table.selectRow(j)
             return
+        r = self.s.fits.iloc[i]
+        if r.success and ev.button == 1:               # press on the peak bottom: drag it
+            bx, by = self.ax.transData.transform((r.TOF * 1e6, r.Yield + r.B))
+            if np.hypot(bx - ev.x, by - ev.y) < 12:
+                col = species_color(self.s.species(i))
+                self._drag = {"i": i, "sigma": float(r.sigma),
+                              "line": self.ax.plot([], [], color=col, ls="--", lw=2)[0],
+                              "dot": self.ax.plot([r.TOF * 1e6], [r.Yield + r.B], "o", ms=9,
+                                                  mfc="white", color=col)[0]}
+                return
         if mode == 0:
             self.s.set_center(i, ev.xdata * 1e-6)
         elif mode == 1:
@@ -1355,6 +1403,112 @@ class PeaksTab(QWidget):
             + (f" (locked {r.locked})" if r.locked else ""))
         self.show_table()
         self.table.selectRow(i)
+
+    def _drag_B(self, i, t_s):
+        lk = self.s.lock(i)
+        if "B" in lk:
+            return lk["B"]
+        if self.s.bg_on:
+            return float(self.s.bg_curve(np.array([t_s]))[0])
+        return float(self.s.fits.iloc[i].B)
+
+    def on_release(self, ev):
+        d, self._drag = self._drag, None
+        if d is None or self.s is None:
+            return
+        if ev.inaxes is not self.ax or ev.xdata is None:
+            self.draw()
+            return
+        i = d["i"]
+        self.s.lock_peak(i, ev.xdata * 1e-6, ev.ydata)
+        r = self.s.fits.iloc[i]
+        self.win.log.appendPlainText(
+            f"U = {self.s.U:g} V, {self.s.name(i)}: peak dragged -> TOF {r.TOF * 1e6:.4f} µs, "
+            f"height {r.Yield:.4g} V, B {r.B:.4g} V, σ {r.sigma * 1e9:.3g} ns "
+            f"(locked {r.locked})")
+        self.show_table()
+        self.table.selectRow(i)
+
+    # ------------------------------------------------------------ yield recap
+    def draw_recap(self):
+        """Peak heights by species and charge state; hatched: may be blended with another
+        line (red xx: same time, cannot be separated; orange //: inside the fit window)."""
+        from matplotlib.patches import Patch
+        s, ax = self.s, self.rax
+        ax.clear()
+        self._rbars = []
+        self._rhover = None
+        if s is None or s.fits is None:
+            self.rcanvas.draw_idle()
+            return
+        ov = s.overlaps()
+        sel = self.sel()
+        sps = list(dict.fromkeys(s.species(i) for i in range(len(s.lines))))
+        w = 0.8 / max(len(sps), 1)
+        ymin, ymax = np.inf, 0.0
+        for i, r in enumerate(s.fits.itertuples()):
+            sp = s.species(i)
+            if not r.success or r.excluded or not np.isfinite(r.Yield):
+                continue
+            h = max(-float(r.Yield), 1e-6)
+            kinds = {k for _, _, k, _ in ov.get(i, [])}
+            hatch, ec = ("xxx", "#c62828") if "same" in kinds else \
+                (("///", "#e65100") if "near" in kinds else (None, species_color(sp)))
+            x = int(r.z) + (sps.index(sp) - (len(sps) - 1) / 2) * w
+            b = ax.bar(x, h, w * 0.95, color=species_color(sp), alpha=0.75, hatch=hatch,
+                       edgecolor="black" if i == sel else ec, lw=2 if i == sel else 0.8)[0]
+            self._rbars.append((b, i))
+            ymin, ymax = min(ymin, h), max(ymax, h)
+        ax.set_yscale("log")
+        if np.isfinite(ymin):
+            ax.set_ylim(ymin / 3, ymax * 40)               # room for the legend
+        ax.set_xlabel("charge state z")
+        ax.set_ylabel("peak height |Yield| [V]")
+        ax.set_title(f"U = {s.U:g} V: heights by species", fontsize=9)
+        zs = sorted({int(z) for _, _, z in s.lines})
+        ax.set_xticks(zs)
+        ax.tick_params(labelsize=7)
+        hand = [Patch(color=species_color(sp), label=sp) for sp in sps]
+        hand += [Patch(facecolor="white", edgecolor="#c62828", hatch="xxx",
+                       label="same time as another line"),
+                 Patch(facecolor="white", edgecolor="#e65100", hatch="///",
+                       label="another line in its window")]
+        ax.legend(handles=hand, fontsize=6, ncol=2, loc="upper right")
+        self._rhover = ax.annotate("", (0, 0), xytext=(8, 8), textcoords="offset points",
+                                   fontsize=7, zorder=10, multialignment="left",
+                                   bbox={"boxstyle": "round", "fc": "lightyellow", "ec": "0.5"})
+        self._rhover.set_visible(False)
+        self.rcanvas.draw_idle()
+
+    def _recap_bar(self, ev):
+        if ev.inaxes is not self.rax:
+            return None
+        for b, i in self._rbars:
+            if b.contains(ev)[0]:
+                return b, i
+        return None
+
+    def recap_click(self, ev):
+        hit = self._recap_bar(ev)
+        if hit is not None:
+            self.table.selectRow(hit[1])
+
+    def recap_hover(self, ev):
+        if self._rhover is None:
+            return
+        hit = self._recap_bar(ev)
+        if hit is not None:
+            b, i = hit
+            right = ev.x > self.rcanvas.width() * 0.5 * self.rcanvas.device_pixel_ratio
+            self._rhover.xy = (b.get_x() + b.get_width() / 2, b.get_height())
+            self._rhover.set_text(self.s.info(i))
+            self._rhover.set_position((-8, 8) if right else (8, 8))
+            self._rhover.set_ha("right" if right else "left")
+            self._rhover.set_visible(True)
+            self.rcanvas.draw_idle()
+        elif self._rhover.get_visible():
+            self._rhover.set_visible(False)
+            self.rcanvas.draw_idle()
 
     def bg_click(self, mode, t, v):
         s, log = self.s, self.win.log.appendPlainText

@@ -75,6 +75,30 @@ def test_window_tabs_and_cbs_fitter(tmp_path, monkeypatch):
     assert pk.table.item(i, pk.COLS.index("locked")).text() == "μB"
     pk.unlock()
     assert pk.s.fits.iloc[i].locked == ""
+    # drag the peak bottom: position and height locked
+    pk.table.selectRow(i)
+    app.processEvents()
+    pk.canvas.draw()
+    r = pk.s.fits.iloc[i]
+    bx, by = pk.ax.transData.transform((r.TOF * 1e6, r.Yield + r.B))
+    pk.mode.setCurrentIndex(0)
+    pk.on_click(MouseEvent("button_press_event", pk.canvas, bx, by, button=1))
+    assert pk._drag is not None
+    tx, ty = pk.ax.transData.transform((r.TOF * 1e6 + 0.01, r.B + 1.05 * r.Yield))
+    pk.on_hover(MouseEvent("motion_notify_event", pk.canvas, tx, ty))
+    pk.on_release(MouseEvent("button_release_event", pk.canvas, tx, ty, button=1))
+    r2 = pk.s.fits.iloc[i]
+    assert r2.locked == "μhB" and abs(r2.Yield / r.Yield - 1.05) < 0.02
+    assert abs(r2.TOF * 1e6 - r.TOF * 1e6 - 0.01) < 1e-3
+    # recap: one bar per good line, click selects
+    assert len(pk._rbars) == int((pk.s.fits.success & ~pk.s.fits.excluded).sum())
+    pk.rcanvas.draw()
+    b, k = pk._rbars[0]
+    cx, cy = pk.rax.transData.transform((b.get_x() + b.get_width() / 2, b.get_height() / 2))
+    pk.recap_click(MouseEvent("button_press_event", pk.rcanvas, cx, cy, button=1))
+    assert pk.sel() == k
+    pk.s.unlock(i)
+    pk.show_table()
     # common background: 2 points, a tuning point, remove it; negative Corr
     def click(t_us, v):
         X, Y = pk.ax.transData.transform((t_us, v))

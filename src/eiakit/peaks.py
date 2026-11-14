@@ -97,17 +97,21 @@ def fit_peak(tof, y, t0: float, corr: float = 0.0, window_frac: float = 0.02,
 def fit_peak_locked(tof, y, t0: float, corr: float = 0.0, window_frac: float = 0.02,
                     mu_bound_s: float = 150e-9, min_points: int = 1,
                     mu: float | None = None, B: float | None = None,
-                    Bt: np.ndarray | None = None) -> dict:
+                    Bt: np.ndarray | None = None, A: float | None = None) -> dict:
     """fit_peak with the peak position mu and/or the background B fixed by hand (Peaks
     tab). mu fixed: scan of sigma (window up to the fit_peak bound), A (and B if free)
     solved by least squares at each sigma, A <= 0 - never fails while the window has
     points. Only B fixed: bounded fit of A, mu, sigma as fit_peak. Same keys as fit_peak,
     plus mu_locked / B_locked.
     Bt: a background curve on the tof grid (common background of the voltage), used as
-    a fixed B(t) when B is None; the B reported is then B(t) at the peak."""
+    a fixed B(t) when B is None; the B reported is then B(t) at the peak.
+    A: the peak height (depth below B, <= 0) fixed too (dragged peak); needs mu (t0 if
+    None); then only sigma (and B if free) is fitted."""
+    if A is not None and mu is None:
+        mu = t0
     if Bt is not None and B is None:
         r = fit_peak_locked(tof, y - Bt, t0, corr, window_frac, mu_bound_s, min_points,
-                            mu, 0.0)
+                            mu, 0.0, A=A)
         if r["success"]:
             r["B"] = float(np.interp(r["mu"], tof, Bt))
         return r
@@ -121,7 +125,7 @@ def fit_peak_locked(tof, y, t0: float, corr: float = 0.0, window_frac: float = 0
     res = {"t0": t0, "win_lo": lo, "win_hi": hi, "n_points": int(mask.sum()),
            "A": np.nan, "mu": np.nan, "sigma": np.nan, "B": np.nan, "success": False,
            "A_at_bound": False, "sigma_at_bound": False, "mu_at_bound": False,
-           "mu_locked": mu is not None, "B_locked": B is not None}
+           "mu_locked": mu is not None, "B_locked": B is not None, "A_locked": A is not None}
     if len(x) < max(min_points, 3):
         res["reason"] = "too few points"
         return res
@@ -130,7 +134,11 @@ def fit_peak_locked(tof, y, t0: float, corr: float = 0.0, window_frac: float = 0
         dt = float(np.median(np.diff(x)))
         sig = np.geomspace(max(dt / 2, sig_hi / 500), sig_hi, 400)
         G = np.exp(-0.5 * ((x[None, :] - mu) / sig[:, None]) ** 2)
-        if B is not None:
+        if A is not None:
+            Afix = min(float(A), 0.0)
+            A = np.full(len(sig), Afix)
+            Bs = np.full_like(A, B) if B is not None else (yy[None, :] - A[:, None] * G).mean(1)
+        elif B is not None:
             A = np.minimum((G * (yy - B)).sum(1) / (G * G).sum(1), 0.0)
             Bs = np.full_like(A, B)
         else:
