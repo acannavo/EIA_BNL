@@ -1067,6 +1067,14 @@ class PeaksTab(QWidget):
             "add / remove tuning point: bends the common background locally through the "
             "click (within the tuning reach) / removes the nearest tuning point")
         mrow.addWidget(self.mode)
+        self.show_total = QCheckBox("total curve (sum of all lines)")
+        self.show_total.setChecked(True)
+        self.show_total.setToolTip("black: every fitted line added on one background (the "
+                                   "common one, else the lines' B joined): where it departs "
+                                   "from the data, neighbouring lines overlap or a fit "
+                                   "over/undershoots")
+        self.show_total.toggled.connect(lambda _: self.draw())
+        mrow.addWidget(self.show_total)
         mrow.addStretch()
         right.addLayout(mrow)
         right.addWidget(QLabel(
@@ -1258,6 +1266,10 @@ class PeaksTab(QWidget):
                 ax.plot(s.tof[w] * 1e6, g[w], color=col, lw=2.4 if i == sel else 1.2,
                         label=sp if sp not in seen else None)
                 seen.add(sp)
+        tot = s.total_curve()
+        if tot is not None and self.show_total.isChecked():
+            ax.plot(s.tof * 1e6, tot, color="black", ls="--", lw=1.4, zorder=4,
+                    label="total (sum of all lines)")
         if s.bg:
             ax.plot(s.tof * 1e6, s.bg_curve(), color=self.BG_COLOR, ls="--",
                     lw=1.2 if s.bg_on else 0.8, alpha=1 if s.bg_on else 0.5,
@@ -1317,6 +1329,10 @@ class PeaksTab(QWidget):
             vals.append(np.array([lk["B"]]))
         if s.bg_on:
             vals.append(s.bg_curve(s.tof[m]))
+        if self.show_total.isChecked():
+            tot = s.total_curve(s.tof[m])
+            if tot is not None:
+                vals.append(tot)
         v = np.concatenate(vals)
         v = v[np.isfinite(v)]
         if len(v):

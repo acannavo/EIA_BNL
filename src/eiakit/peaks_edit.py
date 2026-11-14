@@ -453,6 +453,27 @@ class PeakSession:
         B = self.bg_curve(t) if r.get("common_bg", False) else r.B
         return r.Yield * np.exp(-0.5 * ((t - r.TOF) / r.sigma) ** 2) + B
 
+    def total_curve(self, t=None) -> np.ndarray | None:
+        """Sum of every fitted, not excluded line on one background: shows how the
+        neighbouring lines add up (overlaps). Background: the common one if on, else the
+        lines' own B joined linearly between their peaks."""
+        t = self.tof if t is None else np.asarray(t, float)
+        f = self.fits
+        ok = (f.success & ~f.excluded).to_numpy() if f is not None else np.array([])
+        if not ok.any():
+            return None
+        g = f[ok]
+        if self.bg_on:
+            base = self.bg_curve(t)
+        else:
+            o = np.argsort(g.TOF.to_numpy(float))
+            base = np.interp(t, g.TOF.to_numpy(float)[o], g.B.to_numpy(float)[o])
+        tot = base.copy()
+        for r in g.itertuples():
+            w = np.abs(t - r.TOF) < 6 * r.sigma
+            tot[w] += r.Yield * np.exp(-0.5 * ((t[w] - r.TOF) / r.sigma) ** 2)
+        return tot
+
     def save(self, fits_root, note: str = "") -> Path:
         ok = self.fits[self.fits.success & ~self.fits.excluded]
         d = peaks_dir(fits_root, self.run)

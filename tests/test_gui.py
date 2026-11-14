@@ -99,6 +99,10 @@ def test_window_tabs_and_cbs_fitter(tmp_path, monkeypatch):
     assert pk.sel() == k
     pk.s.unlock(i)
     pk.show_table()
+    labels = [ln.get_label() for ln in pk.ax.get_lines()]
+    assert "total (sum of all lines)" in labels
+    tot = pk.s.total_curve()
+    assert tot is not None and tot.shape == pk.s.tof.shape
     # common background: 2 points, a tuning point, remove it; negative Corr
     def click(t_us, v):
         X, Y = pk.ax.transData.transform((t_us, v))
