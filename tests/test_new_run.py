@@ -48,6 +48,8 @@ def test_new_dataset_end_to_end(env, capsys):
     assert main(["run", "20251120"]) == 0
     out = capsys.readouterr().out
     assert "fit store" in out
+    html = (p / "40_report" / "report.html").read_text(encoding="utf-8")
+    assert "Peak velocity per charge state" in html     # CBS fitter components: fitted peak
     (env / "db" / "studies" / "NEW.toml").write_text(
         'name = "NEW"\nruns = ["20251120"]\nrows = ["Nb"]\ncolumn_energy_mJ = [370.0]\n'
         '[zbar]\ne_max_eV = { Nb = 3.1e4 }\nlower_from_z = 2\n', encoding="utf-8")

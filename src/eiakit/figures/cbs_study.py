@@ -37,22 +37,29 @@ def _mean_lines(p, g, comps, col, unit="km/s", fmt=".0f"):
         p.headroom = 0.12 + 0.12 * len(info)
 
 
-def velocity(tab, energy_mJ, avg_components: dict, kind: str = "velocity") -> Figure:
+def velocity(tab, energy_mJ, avg_components: dict, kind: str = "velocity",
+             elements=("Al", "Nb"), title: str | None = None) -> Figure:
     """kind 'velocity': u of the PEAK sample, bars to the neighbour samples;
-    'picks': picked peak, bars to the picked half-maximum points."""
+    'picks': picked peak, bars to the picked half-maximum points.
+    energy_mJ None: no selection by energy (one run's table); elements: one panel each
+    (the run report: the run's element only)."""
     ucol, lo, hi = (("u_peak", "u_prev", "u_next") if kind == "velocity"
                     else ("u_pick", "u_right", "u_left"))
-    t = tab[(tab.energy_mJ == energy_mJ) & ~tab.excluded]
-    fig = Figure(rows=1, cols=2, size_in=(4.7, 2.65), height_px=470, letters=True,
-                 legend="figure", title=f"{energy_mJ:g} mJ" + (" (picked peaks)"
-                                                               if kind == "picks" else ""))
-    for j, el in enumerate(["Al", "Nb"]):
+    t = tab[~tab.excluded] if energy_mJ is None else \
+        tab[(tab.energy_mJ == energy_mJ) & ~tab.excluded]
+    cond = "" if energy_mJ is None else f"{energy_mJ:g} mJ"
+    n = len(elements)
+    fig = Figure(rows=1, cols=n, size_in=(2.6 + 2.1 * (n - 1), 2.65),
+                 height_px=470, letters=n > 1, legend="figure",
+                 title=(title if title is not None else cond)
+                 + (" (picked peaks)" if kind == "picks" else ""))
+    for j, el in enumerate(elements):
         p = fig.panel(0, j)
         p.title, p.xlabel = el, Z_LABEL
         p.ylabel = U_LABEL if j == 0 else None
         g = t[t.species == el]
         if g.empty:
-            p.empty_text = f"{el}, {energy_mJ:g} mJ: no data"
+            p.empty_text = f"{el}, {cond}: no data" if cond else f"{el}: no data"
             continue
         for c in ORDER:
             r = g[g.component == c].sort_values("z")

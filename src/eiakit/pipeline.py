@@ -395,12 +395,36 @@ def _report_params(db, run):
             "zbar_default": None if st is not None or _default_zbar(db) is None
             else _jsonable(_default_zbar(db)),
             "cbs_components": {str(k): v for k, v in run.cbs_names.items()},
+            "avg_components": _avg_components(db, run),
             "run": {"target": run.target, "label": run.label,
                     "laser": _jsonable(run.laser), "mass_labels": run.mass_labels}}
 
 
 def _report_inputs(db, run, data_root, ins):
     _cbs_inputs(db, run, data_root, ins)
+
+
+def _avg_components(db, run) -> dict:
+    """Components averaged in the velocity figure (dotted line, mean +/- std): the run's
+    study, else the study of [report] zbar_from_study, else fast for every element."""
+    st = study_of(db, run)
+    name = db.pipeline.get("report", {}).get("zbar_from_study")
+    if st is None and name in db.studies:
+        st = db.studies[name]
+    return dict(st.avg_components) if st is not None and st.avg_components else \
+        {run.target: ["fast"]}
+
+
+def _velocity_table(db, run, data_root, areas, st):
+    """The run's CBS components (cbs_study.run_components); where the fit has no raw
+    peak samples (fits made in the CBS fitter) the fitted peak velocity is used."""
+    from .cbs_study import run_components
+    tab = run_components(db, run, data_root, areas, st)
+    if tab.empty:
+        return tab, False
+    fb = tab.u_peak.isna() & tab.u_fit.notna()
+    tab.loc[fb, "u_peak"] = tab.loc[fb, "u_fit"]
+    return tab, bool(fb.any())
 
 
 def _default_zbar(db):
@@ -450,6 +474,25 @@ def _report_execute(db, run, ctx):
             cols = ["z", "CBS", "t_peak_fit_us", "FWHM_fit_us", "Area_model", "Fraction",
                     "Ions_model_full_cm2", "Ions_data_win_cm2", "Win_coverage", "win_src"]
             items.append(("table", areas[[c for c in cols if c in areas]], "CBS areas"))
+        try:
+            vt, fb = _velocity_table(db, run, ctx.data_root, areas, st)
+        except FileNotFoundError:
+            vt, fb = None, False
+        if vt is not None and len(vt):
+            from .figures import cbs_study as cf
+            mj = run.laser.energy_mJ
+            items += [("h2", "Peak velocity per charge state"),
+                      ("p", "u = L / t at the peak sample of each CBS component; bars: the "
+                            "neighbour samples (as plot_cbs_multipanel_v2). Dotted lines and "
+                            "labels: mean ± std over z of "
+                            + ", ".join(f"{el}: {', '.join(c)}" for el, c in
+                                        _avg_components(db, run).items())
+                            + (" (study exclusions applied)." if st is not None else ".")
+                            + (" Components fitted in the CBS fitter have no peak samples: "
+                               "their fitted peak is shown, without bars." if fb else "")),
+                      cf.velocity(vt, None, _avg_components(db, run), "velocity",
+                                  elements=(run.target,),
+                                  title=(f"{mj:g} mJ" if mj else run.label))]
     if a["zb"] is not None:
         S = compute_sheil(ds)
         items += [("h2", "Average charge state and energy spectra"),
@@ -475,7 +518,8 @@ STAGES: dict[str, Stage] = {s.name: s for s in [
           _cbs_params, _cbs_inputs, _cbs_execute,
           "cbs_manual_fitter_v12: legacy CBS parameters on the current calibration"),
     Stage("report", "40_report", ["calibration", "cbs"],
-          ["analysis", "cbs", "store", "figures/run_report", "figures/export",
+          ["analysis", "cbs", "cbs_study", "cbs_store", "store", "figures/run_report",
+           "figures/cbs_study", "figures/export",
            "figures/render_plotly", "figures/spec", "figures/style", "figures/powerlaw"],
           _report_params, _report_inputs, _report_execute, "per-run HTML report"),
 ]}
