@@ -128,3 +128,17 @@ def test_line_choice_noise_cut_and_run_defaults(env, tmp_path):
     r = fit_run(db, run, env / "data", tmp_path / "out",
                 defaults=json.loads((fits / run.key / "peaks" / "defaults.json").read_text()))
     assert r["lines_from"] == "Peaks-tab defaults" and r["lines_total"] == 2 * 18
+
+
+def test_calibration_with_an_empty_voltage(env):
+    """A voltage whose lines are all below the noise cut leaves a header-only peak file;
+    the calibration must still run (was: HDF5 TypeError on object columns)."""
+    from eiakit.cli import main
+    main(["add-run", "20251120", "--target", "Nb", "--energy", "780", "--like", "20250611"])
+    assert main(["run", "20251120", "--stage", "peaks"]) == 0
+    out = env / "processed" / "20251120" / "10_peaks" / "output"
+    files = sorted(out.glob("p*.txt"))
+    files[0].write_text("m,z,TOF,Yield\n")
+    assert main(["run", "20251120", "--stage", "calibration", "--force"]) == 0
+    h5 = env / "processed" / "20251120" / "20_calibration" / "spectra.h5"
+    assert h5.is_file() and not h5.with_name("spectra.h5.part").exists()

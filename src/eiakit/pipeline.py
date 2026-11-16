@@ -416,15 +416,10 @@ def _avg_components(db, run) -> dict:
 
 
 def _velocity_table(db, run, data_root, areas, st):
-    """The run's CBS components (cbs_study.run_components); where the fit has no raw
-    peak samples (fits made in the CBS fitter) the fitted peak velocity is used."""
+    """The run's CBS components (cbs_study.run_components): fitted peak velocity u_fit,
+    t_peak_fit_us and FWHM_fit_us (from the cbs stage areas)."""
     from .cbs_study import run_components
-    tab = run_components(db, run, data_root, areas, st)
-    if tab.empty:
-        return tab, False
-    fb = tab.u_peak.isna() & tab.u_fit.notna()
-    tab.loc[fb, "u_peak"] = tab.loc[fb, "u_fit"]
-    return tab, bool(fb.any())
+    return run_components(db, run, data_root, areas, st)
 
 
 def _default_zbar(db):
@@ -475,22 +470,20 @@ def _report_execute(db, run, ctx):
                     "Ions_model_full_cm2", "Ions_data_win_cm2", "Win_coverage", "win_src"]
             items.append(("table", areas[[c for c in cols if c in areas]], "CBS areas"))
         try:
-            vt, fb = _velocity_table(db, run, ctx.data_root, areas, st)
+            vt = _velocity_table(db, run, ctx.data_root, areas, st)
         except FileNotFoundError:
-            vt, fb = None, False
+            vt = None
         if vt is not None and len(vt):
             from .figures import cbs_study as cf
             mj = run.laser.energy_mJ
             items += [("h2", "Peak velocity per charge state"),
-                      ("p", "u = L / t at the peak sample of each CBS component; bars: the "
-                            "neighbour samples (as plot_cbs_multipanel_v2). Dotted lines and "
-                            "labels: mean ± std over z of "
+                      ("p", "u = L / t at the peak of each fitted CBS function; bars: its "
+                            "FWHM (u at the half-maximum points t ∓ FWHM/2, so asymmetric). "
+                            "Dotted lines and labels: mean ± std over z of "
                             + ", ".join(f"{el}: {', '.join(c)}" for el, c in
                                         _avg_components(db, run).items())
-                            + (" (study exclusions applied)." if st is not None else ".")
-                            + (" Components fitted in the CBS fitter have no peak samples: "
-                               "their fitted peak is shown, without bars." if fb else "")),
-                      cf.velocity(vt, None, _avg_components(db, run), "velocity",
+                            + (" (study exclusions applied)." if st is not None else ".")),
+                      cf.velocity(vt, None, _avg_components(db, run), "fit",
                                   elements=(run.target,),
                                   title=(f"{mj:g} mJ" if mj else run.label))]
     if a["zb"] is not None:

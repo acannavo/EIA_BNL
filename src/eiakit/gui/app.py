@@ -569,7 +569,13 @@ class FitterTab(QWidget):
             self.s = CBSSession.load(self.win.db, self.win.db.run(key), self.win.paths.data,
                                      self.win.paths.processed)
         except Exception as e:                         # noqa: BLE001 - shown to the user
-            QMessageBox.warning(self, "CBS fitter", str(e))
+            msg = str(e)
+            if "corrected_" in msg or "spectra.h5" in msg or "Unable to" in msg:
+                msg = (f"{key}: the calibration output (processed/{key}/20_calibration/"
+                       "spectra.h5) is missing or incomplete - the calibration stage failed "
+                       "or has not run. Run the run (Runs tab) and look at the log.\n\n"
+                       f"({e})")
+            QMessageBox.warning(self, "CBS fitter", msg)
             return
         self.src.setText(f"<small>{self.s.source}</small>")
         self.fill_z()

@@ -268,7 +268,7 @@ def _picked(run):
 def prepare_rows(db, run, data_root) -> dict:
     """The untitled28 peak rows the calibration uses: Output/p<U>.txt after the N1
     (output_duplicates) and N8 (overlaps) settings. {rows, n_rows_file, N1, N8} or {error}."""
-    from .legacy import keep_last_save, read_output_folder, resolve_overlaps
+    from .legacy import keep_last_save, numeric_columns, read_output_folder, resolve_overlaps
 
     pipe = db.pipeline["calibration"]
     sem = run.folder(data_root) / run.acquisition.sem.folder
@@ -291,11 +291,18 @@ def prepare_rows(db, run, data_root) -> dict:
     ovr = override_files(default_fits_root(), run)
     for U, f in ovr.items():
         new = pd.read_csv(f)
+        rows = rows[rows.U != U]
+        if new.empty:                      # every line of this voltage excluded / noise
+            continue
         new.insert(0, "row", range(len(new)))
         new.insert(0, "U", U)
         new.insert(0, "file", f"fits:{f.name}")
-        rows = pd.concat([rows[rows.U != U], new.astype({"m": int, "z": int})],
+        rows = pd.concat([rows, numeric_columns(new).astype({"m": int, "z": int})],
                          ignore_index=True)
+    rows = numeric_columns(rows.reset_index(drop=True))
+    if rows.empty:
+        return {"error": "no peak line left (every voltage empty after the Peaks-tab "
+                         "choices / noise cut)"}
     dup_mode = pipe.get("output_duplicates", "all")
     if dup_mode in ("last_per_mz", "last_save"):                   # N1
         det = sem / "Output_detail"

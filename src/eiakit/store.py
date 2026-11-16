@@ -22,7 +22,19 @@ def _unk(name):
 
 
 def save_calibration_h5(path: Path, res: dict, attrs: dict | None = None) -> Path:
+    """Written to a temporary file and renamed: a failed write never leaves a partial
+    spectra.h5 behind (the CBS fitter would open it)."""
     path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".part")
+    try:
+        _write_h5(tmp, res, attrs)
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return path
+
+
+def _write_h5(path: Path, res: dict, attrs: dict | None) -> None:
     with h5py.File(path, "w") as h:
         for name in ("corrected_tof", "corrected_tof_1m"):
             h.create_dataset(name, data=res[name])
@@ -47,7 +59,6 @@ def save_calibration_h5(path: Path, res: dict, attrs: dict | None = None) -> Pat
         h.attrs["signal"] = "charge"            # J_z with the factor z inside (legacy)
         for k, v in (attrs or {}).items():
             h.attrs[k] = json.dumps(v) if isinstance(v, (dict, list)) else v
-    return path
 
 
 def load_calibration_h5(path: Path) -> dict:

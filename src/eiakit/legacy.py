@@ -49,6 +49,8 @@ def read_output_folder(folder: Path) -> pd.DataFrame:
         if U is None:
             continue
         df = pd.read_csv(f)
+        if df.empty:                       # a voltage with no line kept (noise cut)
+            continue
         df.insert(0, "row", range(len(df)))
         df.insert(0, "U", U)
         df.insert(0, "file", f.name)
@@ -58,7 +60,16 @@ def read_output_folder(folder: Path) -> pd.DataFrame:
     out = pd.concat(frames, ignore_index=True)
     for c in ("m", "z"):
         out[c] = out[c].astype(int)
-    return out
+    return numeric_columns(out)
+
+
+def numeric_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Every column but 'file' as numbers (a header-only file reads as text, and one
+    text column makes the HDF5 store fail)."""
+    for c in df.columns:
+        if c != "file" and df[c].dtype == object:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+    return df
 
 
 def read_output_detail_folder(folder: Path) -> pd.DataFrame:

@@ -22,6 +22,17 @@ def _bounds(u, lo, hi):
     return np.minimum(lo, hi), np.maximum(lo, hi)
 
 
+def _fwhm_bounds(r):
+    """u at the half-maximum points t -/+ FWHM/2 of the fitted function (no bar where the
+    FWHM is unknown)."""
+    u, tt = r.u_fit.to_numpy(float), r.t_peak_fit_us.to_numpy(float)
+    half = r.FWHM_fit_us.to_numpy(float) / 2 if "FWHM_fit_us" in r else 0 * u
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ul = np.where(tt - half > 0, u * tt / (tt - half), np.nan)
+        ur = u * tt / (tt + half)
+    return np.nan_to_num(ur, nan=u), np.nan_to_num(ul, nan=u)
+
+
 def _mean_lines(p, g, comps, col, unit="km/s", fmt=".0f"):
     info = []
     for c in comps:
@@ -40,11 +51,14 @@ def _mean_lines(p, g, comps, col, unit="km/s", fmt=".0f"):
 def velocity(tab, energy_mJ, avg_components: dict, kind: str = "velocity",
              elements=("Al", "Nb"), title: str | None = None) -> Figure:
     """kind 'velocity': u of the PEAK sample, bars to the neighbour samples;
-    'picks': picked peak, bars to the picked half-maximum points.
+    'picks': picked peak, bars to the picked half-maximum points;
+    'fit': peak of the fitted CBS function, bars = its FWHM (half-maximum points at
+    t -/+ FWHM/2, asymmetric in u), as fit_summary.
     energy_mJ None: no selection by energy (one run's table); elements: one panel each
     (the run report: the run's element only)."""
-    ucol, lo, hi = (("u_peak", "u_prev", "u_next") if kind == "velocity"
-                    else ("u_pick", "u_right", "u_left"))
+    ucol, lo, hi = {"velocity": ("u_peak", "u_prev", "u_next"),
+                    "picks": ("u_pick", "u_right", "u_left"),
+                    "fit": ("u_fit", None, None)}[kind]
     t = tab[~tab.excluded] if energy_mJ is None else \
         tab[(tab.energy_mJ == energy_mJ) & ~tab.excluded]
     cond = "" if energy_mJ is None else f"{energy_mJ:g} mJ"
@@ -66,7 +80,10 @@ def velocity(tab, energy_mJ, avg_components: dict, kind: str = "velocity",
             if r.empty:
                 continue
             u = r[ucol].to_numpy(float)
-            a, b = _bounds(u, r[lo].to_numpy(float), r[hi].to_numpy(float))
+            if kind == "fit":
+                a, b = _fwhm_bounds(r)
+            else:
+                a, b = _bounds(u, r[lo].to_numpy(float), r[hi].to_numpy(float))
             hov = [f"z = {z}, u = {v:.1f} km/s" for z, v in zip(r.z, u, strict=True)]
             p.add(ErrorBars(r.z.to_numpy(float), u, COMPONENT_NAMES.get(c, c),
                             COLORS.get(c, "gray"), ylo=a, yhi=b, marker=MARKERS.get(c, "o"),
