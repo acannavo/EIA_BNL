@@ -922,8 +922,8 @@ class FitterTab(QWidget):
 # --------------------------------------------------------------------- peak picker
 
 class PeaksTab(QWidget):
-    COLS = ["species", "m", "z", "t0 [µs]", "TOF [µs]", "Yield [V]", "σ [ns]", "B [V]", "ok",
-            "locked", "overlap", "excluded", "ref. TOF [µs]", "ref. Yield [V]"]
+    COLS = ["species", "m", "z", "t0 [µs]", "TOF [µs]", "Yield [V]", "σ [ns]", "B [V]", "S/N",
+            "ok", "locked", "overlap", "excluded", "ref. TOF [µs]", "ref. Yield [V]"]
     MODES = ["window centre", "peak position (lock μ)", "background level (lock B)",
              "common background: 2 points", "common background: add tuning point",
              "common background: remove tuning point"]
@@ -944,9 +944,31 @@ class PeaksTab(QWidget):
         self.ulist.currentRowChanged.connect(self.load_U)
         left.addWidget(QLabel("Voltage (with raw SEM files; * = refitted)"))
         left.addWidget(self.ulist, 1)
-        self.all_lines = QCheckBox("all lines (every z to z max)")
-        self.all_lines.toggled.connect(lambda _: self.load_U(self.ulist.currentRow()))
-        left.addWidget(self.all_lines)
+        lb = QGroupBox("Lines at this voltage (species, up to z)")
+        self.lines_form = QFormLayout(lb)
+        self.line_rows = {}                            # label -> (QCheckBox, QSpinBox)
+        self.snr = QDoubleSpinBox()
+        self.snr.setRange(0, 50)
+        self.snr.setSingleStep(0.5)
+        self.snr.setDecimals(1)
+        self.snr.setToolTip("a line whose height is below this x the local noise is left "
+                            "out (grey, 'noise'); Exclude/include brings one back. 0 = off")
+        self.snr.valueChanged.connect(self.choice_changed)
+        self.mub = QDoubleSpinBox()
+        self.mub.setRange(0, 1000)
+        self.mub.setSingleStep(10)
+        self.mub.setDecimals(0)
+        self.mub.setSuffix(" ns")
+        self.mub.setToolTip("how far a peak may move from its window centre; never further "
+                            "than the fit window (it is clamped to the half window)")
+        self.mub.valueChanged.connect(self.choice_changed)
+        self.lines_form.addRow("min S/N", self.snr)
+        self.lines_form.addRow("peak may move ±", self.mub)
+        self.lines_form.addRow(_btn(
+            "Use for all voltages", self.use_for_all,
+            "these lines, min S/N and peak freedom for every voltage not saved by itself "
+            "(new runs: also for the peaks stage on the next run)"))
+        left.addWidget(lb)
         self.corr = QDoubleSpinBox()
         wf = float(win.db.pipeline["peaks"].get("window_frac", 0.02))
         self.corr.setRange(-wf + 0.001, 0.1)
@@ -1124,8 +1146,7 @@ class PeaksTab(QWidget):
             return
         try:
             self.s = PeakSession.load(self.win.db, self.run(), self.win.paths.data,
-                                      self.Us[r], self.all_lines.isChecked(),
-                                      self.win.paths.processed)
+                                      self.Us[r], processed=self.win.paths.processed)
         except Exception as e:                         # noqa: BLE001 - shown to the user
             QMessageBox.warning(self, "Peaks", str(e))
             return
@@ -1138,12 +1159,73 @@ class PeaksTab(QWidget):
         self._bg_click = None
         if self.s.bg:
             self.bg_reach.setValue(self.s.bg.get("reach", 0.03) * 100)
+        self.fill_choice()
         self._loading = False
         if saved:
             self.win.log.appendPlainText(f"U = {self.s.U:g} V: the saved fit (clicks "
                                          f"{self.s.u_clicks}, LOF clicks {self.s.lof_clicks}, "
                                          f"Corr {self.s.corr:g})")
         self.show_table()
+
+    # ------------------------------------------------------------ line choice
+    def fill_choice(self):
+        """One row per species: use it, up to which z (this voltage)."""
+        s = self.s
+        was = self._loading
+        self._loading = True
+        for cb, _sp in self.line_rows.values():
+            self.lines_form.removeRow(cb)
+        self.line_rows = {}
+        cur = s.selection()
+        for k, (name, lab, _m, zc) in enumerate(s.choices()):
+            cb = QCheckBox(f"{name} (m {lab})")
+            cb.setStyleSheet(f"color: {species_color(name)}")
+            cb.setChecked(lab in cur)
+            sp = QSpinBox()
+            sp.setRange(1, zc)
+            sp.setPrefix("z ≤ ")
+            sp.setValue(min(cur.get(lab, min(zc, 8)), zc))
+            sp.setEnabled(lab in cur)
+            cb.toggled.connect(sp.setEnabled)
+            cb.toggled.connect(self.choice_changed)
+            sp.valueChanged.connect(self.choice_changed)
+            self.lines_form.insertRow(k, cb, sp)
+            self.line_rows[lab] = (cb, sp)
+        self.snr.setValue(s.min_snr)
+        self.mub.setValue(s.mu_bound * 1e9)
+        self._loading = was
+
+    def choice_changed(self, *_):
+        if self.s is None or self._loading:
+            return
+        sel = {lab: sp.value() for lab, (cb, sp) in self.line_rows.items() if cb.isChecked()}
+        if not sel:
+            QMessageBox.information(self, "Peaks", "Choose at least one species.")
+            return
+        self.s.min_snr = self.snr.value()
+        self.s.mu_bound = self.mub.value() * 1e-9
+        if sel != self.s.selection():
+            self.s.set_selection(sel)
+        else:
+            self.s.refit()
+        f = self.s.fits
+        names = {lab: name for name, lab, _, _ in self.s.choices()}
+        self.win.log.appendPlainText(
+            f"U = {self.s.U:g} V: {len(f)} lines ("
+            + ", ".join(f"{names.get(lab, lab)} ≤ {z}+" for lab, z in sel.items())
+            + f"), {int(f.weak.sum())} below S/N {self.s.min_snr:g}, peak freedom ± "
+            f"{self.s.mu_bound * 1e9:.0f} ns")
+        self.show_table()
+
+    def use_for_all(self):
+        if self.s is None:
+            return
+        p = self.s.save_defaults(self.win.paths.fits)
+        self.win.log.appendPlainText(
+            f"{self.s.run.key}: lines {self.s.selection()}, min S/N {self.s.min_snr:g}, "
+            f"peak freedom ± {self.s.mu_bound * 1e9:.0f} ns -> every voltage not saved by "
+            f"itself ({p})" + ("; run the run again for the peaks stage"
+                               if self.s.run.is_new else ""))
 
     def sel(self):
         rows = {i.row() for i in self.table.selectedIndexes()}
@@ -1227,9 +1309,11 @@ class PeaksTab(QWidget):
             lt, ly = li.get((int(rec["m"]), int(rec["z"])), (np.nan, np.nan))
             sp = s.species(r)
             vals = [f"{sp}{int(rec['z'])}+", rec["m"], rec["z"], rec["t0"] * 1e6,
-                    rec["TOF"] * 1e6, rec["Yield"], rec["sigma"] * 1e9, rec["B"],
+                    rec["TOF"] * 1e6, rec["Yield"], rec["sigma"] * 1e9, rec["B"], rec["snr"],
                     ("at edge" if rec.get("at_edge") else "yes") if rec["success"] else "no",
-                    rec.get("locked", ""), ovt, "yes" if rec["excluded"] else "", lt * 1e6, ly]
+                    rec.get("locked", ""), ovt,
+                    ("yes" if r in s.excluded else "noise") if rec["excluded"] else "",
+                    lt * 1e6, ly]
             for c, v in enumerate(vals):
                 txt = v if isinstance(v, str) else ("" if not np.isfinite(v) else f"{v:.6g}")
                 it = QTableWidgetItem(txt)
@@ -1574,7 +1658,7 @@ class PeaksTab(QWidget):
     def toggle(self):
         i = self.sel()
         if self.s and i is not None:
-            self.s.exclude(i, i not in self.s.excluded)
+            self.s.exclude(i, not bool(self.s.fits.excluded.iloc[i]))
             self.show_table()
             self.table.selectRow(i)
 

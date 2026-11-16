@@ -62,6 +62,7 @@ class Species(_Model):
     mass_amu: float = Field(gt=0)
     data_labels: list[int]
     file_label: int
+    Z: int | None = Field(default=None, gt=0)   # atomic number: highest possible charge
 
 
 # ---------------------------------------------------------------- instruments

@@ -21,7 +21,7 @@ max_u_clicks      = 30        # replay: search the U actually used within +/- th
 # (the m column of the Output files) and highest z fitted (override per run: peaks_z_max)
 [peaks.new_runs]
 labels = { Nb = 92, Al = 26, H = 1, C = 12, O = 16 }
-z_max  = { 92 = 22, 26 = 13, 1 = 1, 12 = 8, 16 = 8 }   # C and O up to 8+ as in the 2026 ps run
+z_max  = { 92 = 22, 26 = 13, 1 = 1, 12 = 6, 16 = 8 }   # never above Z (species.toml)
 center_search_frac = 0.03   # window centre: strong lines sought within +/- this of the prediction
 center_max_dev     = 0.03   # a voltage's own centre factor used if within this of the run median
 
@@ -86,3 +86,13 @@ mass_constants = "codata"
 
 [report]
 zbar_from_study = "PRL_AlNb"   # z-bar fit window (e_min/e_max per target, lower_from_z) of runs in no study
+
+[peak_selection]
+# Peaks tab and the peaks stage of new runs (not the untitled28 replay of old runs).
+# A voltage's own choice (Peaks tab, saved) or the run's defaults
+# (fits/<run>/peaks/defaults.json, "Use for all voltages") win over these.
+min_snr    = 3.0       # new runs: a line whose height is below min_snr x the local noise
+                       # (signal smoothed over the peak width, robust spread within
+                       # +/- 8 % of t) is left out; 0 = off. Old runs: 0 unless chosen.
+mu_bound_s = 150e-9    # a peak may move this far from its window centre, and never out
+                       # of its fit window (clamped to the half window)

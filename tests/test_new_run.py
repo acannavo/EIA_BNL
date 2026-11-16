@@ -1,5 +1,6 @@
 """A new dataset (raw files only, no legacy results) through the whole pipeline:
 add-run, run (audit, peaks fit, calibration, cbs, report), cbs-seed, run, study."""
+import json
 import os
 import shutil
 from pathlib import Path
@@ -84,6 +85,44 @@ def test_peak_picker_on_a_new_run_reproduces_the_pipeline(env):
     db = load_database()
     s = PeakSession.load(db, db.run("20251120"), env / "data", 35.0,
                          processed=env / "processed")
-    assert len(s.fits) == len(s.legacy) > 20 and s.k != 1.0
-    m = s.fits[s.fits.success].merge(s.legacy, on=["m", "z"], suffixes=("", "_ref"))
-    assert (abs(m.TOF / m.TOF_ref - 1) < 1e-12).all()
+    # every line is tried (> 20), the stage keeps those above the noise cut, the same
+    # ones the session keeps
+    kept = s.fits[s.fits.success & ~s.fits.excluded]
+    assert len(s.fits) > 20 and s.k != 1.0 and len(kept) == len(s.legacy) >= 6
+    m = kept.merge(s.legacy, on=["m", "z"], suffixes=("", "_ref"))
+    assert len(m) == len(kept) and (abs(m.TOF / m.TOF_ref - 1) < 1e-12).all()
+
+
+def test_line_choice_noise_cut_and_run_defaults(env, tmp_path):
+    import numpy as np
+
+    from eiakit.cli import main
+    from eiakit.db import load_database
+    from eiakit.peaks import fit_run, new_run_lines
+    from eiakit.peaks_edit import PeakSession
+    main(["add-run", "20251120", "--target", "Nb", "--energy", "780", "--like", "20250611"])
+    db = load_database()
+    run = db.run("20251120")
+    assert max(z for _, lab, z in new_run_lines(db, run) if lab == 12) == 6   # C: Z = 6
+    s = PeakSession.load(db, run, env / "data", 35.0)
+    s.set_selection({92: 12, 12: 99})                  # capped at Z
+    assert s.selection() == {92: 12, 12: 6}
+    f = s.fits[s.fits.success]
+    half = f.t0 * 0.02
+    assert ((f.TOF - f.t0).abs() <= half * (1 + 1e-9)).all()   # never out of the window
+    s.mu_bound = 20e-9
+    s.refit()
+    f = s.fits[s.fits.success]
+    assert ((f.TOF - f.t0).abs() <= 20e-9 * (1 + 1e-6)).all()
+    weak = s.fits.weak & s.fits.excluded
+    assert weak.any() and not s.fits[s.fits.m == 12].snr.gt(3).any()   # no carbon here
+    i = int(np.flatnonzero(weak)[0])
+    s.exclude(i, False)                                # kept by hand
+    assert not s.fits.excluded.iloc[i]
+    fits = tmp_path / "fits"
+    s.save_defaults(fits)
+    s2 = PeakSession.load(db, run, env / "data", 30.0)
+    assert not s2.restore(fits) and s2.selection() == {92: 12, 12: 6} and s2.mu_bound == 20e-9
+    r = fit_run(db, run, env / "data", tmp_path / "out",
+                defaults=json.loads((fits / run.key / "peaks" / "defaults.json").read_text()))
+    assert r["lines_from"] == "Peaks-tab defaults" and r["lines_total"] == 2 * 18

@@ -192,8 +192,12 @@ def _peaks_params(db, run):
     if run.is_new:
         from .peaks import new_run_lines
         prof = db.profile_for(run, "peaks")
+        from .cbs_store import default_fits_root
+        from .peaks import read_line_defaults
         return {"pipeline.peaks": db.pipeline["peaks"], "eia": _jsonable(run.eia),
                 "acquisition.sem": _jsonable(run.acquisition.sem),
+                "peak_selection": db.pipeline.get("peak_selection", {}),
+                "peaks_tab_defaults": read_line_defaults(default_fits_root(), run),
                 "lines": new_run_lines(db, run), "constants": _jsonable(db.profile(prof))}
     leg = run.legacy
     return {"pipeline.peaks": db.pipeline["peaks"], "eia": _jsonable(run.eia),
@@ -219,7 +223,10 @@ def _peaks_execute(db, run, ctx):
 
     from .peaks import fit_run, load_peak_state, replay_run
     if run.is_new:                     # no untitled28 results: fit every voltage
-        r = fit_run(db, run, ctx.data_root, ctx.out)
+        from .cbs_store import default_fits_root
+        from .peaks import read_line_defaults
+        r = fit_run(db, run, ctx.data_root, ctx.out,
+                    defaults=read_line_defaults(default_fits_root(), run))
         return "error" not in r, r
     res = replay_run(db, run, ctx.data_root, state=load_peak_state(db, run.key))
     pd.DataFrame(res["summary"]).to_csv(ctx.out / "replay_summary.csv", index=False)

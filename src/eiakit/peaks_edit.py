@@ -8,6 +8,9 @@ Peak picker (replaces the per-voltage work of untitled28):
     s.lock_mu(i, t_s) / s.lock_B(i, volts) / s.unlock(i)   # hand-set peak position / background
     s.lock_peak(i, t_s, volts)            # dragged peak: position and height locked
     s.overlaps()                          # lines that may be blended with others
+    s.set_selection({26: 13, 12: 4})      # which species / up to which z at this voltage
+    s.min_snr, s.mu_bound                 # noise cut, how far a peak may move (refit after)
+    s.save_defaults(fits_root)            # this choice for every voltage not saved itself
     s.set_common_bg((t1, v1), (t2, v2))   # one background for every line: horizontal at
     s.add_tune(t, v) / s.remove_tune(t)   # the mean of 2 clicks, + local tuning points
     s.save(fits_root)        # fits/<run>/peaks/p<U>.txt (Output columns) + _detail.txt
@@ -31,7 +34,18 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .peaks import average_repeats, fit_peak_locked, gui_lof, gui_voltage, predicted_tof
+from .peaks import (
+    average_repeats,
+    fit_peak_locked,
+    gui_lof,
+    gui_voltage,
+    lines_from_selection,
+    local_noise,
+    predicted_tof,
+    read_line_defaults,
+    selection_defaults,
+    species_choices,
+)
 
 
 def _ustr(U: float) -> str:
@@ -84,6 +98,9 @@ class PeakSession:
     # common background of this voltage: None or {"pts": [(t, V), (t, V)], "tune":
     # [(t, V)], "reach": frac, "on": bool}; a per-line B lock wins over it
     bg: dict | None = None
+    min_snr: float = 0.0             # lines below min_snr x local noise: left out (0 = off)
+    mu_bound: float = 150e-9         # how far a peak may move (s), never out of its window
+    forced: set = field(default_factory=set)         # weak lines kept by hand (indices)
 
     @classmethod
     def voltages(cls, run, data_root) -> list[float]:
@@ -122,7 +139,7 @@ class PeakSession:
             prof = db.profile(db.profile_for(run, "peaks"))
             s = cls(db, run, U, tof, y, traces, new_run_lines(db, run),
                     det[det.U == U] if len(det) else det, run.eia.L_m, prof, settings, k=k,
-                    k_auto=k)
+                    k_auto=k, **_sel_fields(db, run))
             s.refit()
             return s
         rows = read_output_folder(sem / "Output")
@@ -138,7 +155,8 @@ class PeakSession:
             lines = [ln for ln in lines if (ln[1], ln[2]) in have]
         prof = db.profile(run.legacy.profile_peaks if run.legacy else "legacy_untitled28")
         L = run.legacy.peaks_lof_m if run.legacy and run.legacy.peaks_lof_m else run.eia.L_m
-        s = cls(db, run, U, tof, y, traces, lines, leg, L, prof, settings)
+        s = cls(db, run, U, tof, y, traces, lines, leg, L, prof, settings,
+                **_sel_fields(db, run))
         s.refit()
         return s
 
@@ -147,8 +165,13 @@ class PeakSession:
         moved windows, excluded lines, centring; refit. True if there was one."""
         p = peaks_dir(fits_root, self.run) / f"p{_ustr(self.U)}.json"
         if fits_root is None or not p.is_file():
+            d = read_line_defaults(fits_root, self.run)   # not saved: the run's defaults
+            if d:
+                self._apply_choice(d)
+                self.refit()
             return False
         m = json.loads(p.read_text(encoding="utf-8"))
+        self._apply_choice(m)
         self.u_clicks = int(m.get("u_clicks", 0))
         self.lof_clicks = int(m.get("lof_clicks", 0))
         self.corr = float(m.get("corr", 0.0))
@@ -163,8 +186,66 @@ class PeakSession:
                                        "on": bool(cb.get("on", True))}
         ex = {tuple(x) for x in m.get("excluded", [])}
         self.excluded = {i for i, (_, lab, z) in enumerate(self.lines) if (lab, z) in ex}
+        fo = {tuple(x) for x in m.get("forced", [])}
+        self.forced = {i for i, (_, lab, z) in enumerate(self.lines) if (lab, z) in fo}
         self.refit()
         return True
+
+    # ---------------------------------------------------------------- line choice
+    def _apply_choice(self, m: dict):
+        """Lines {label: z max}, min_snr, mu_bound_s of a saved voltage or the defaults
+        (no refit; window centres are dropped when the lines change)."""
+        if "min_snr" in m:
+            self.min_snr = float(m["min_snr"])
+        if "mu_bound_s" in m:
+            self.mu_bound = float(m["mu_bound_s"])
+        if m.get("lines"):
+            self._set_lines({int(k): int(v) for k, v in m["lines"].items()})
+
+    def selection(self) -> dict[int, int]:
+        """{label: highest z} of the lines of this voltage."""
+        out: dict[int, int] = {}
+        for _, lab, z in self.lines:
+            out[int(lab)] = max(out.get(int(lab), 0), int(z))
+        return out
+
+    def choices(self) -> list[tuple[str, int, float, int]]:
+        """(species, label, m_amu, highest possible z) for the line chooser."""
+        return species_choices(self.db, self.run, self.lines)
+
+    def set_selection(self, sel: dict):
+        """Lines of this voltage: {label: z max} (0 or absent = species not used).
+        Exclusions, locks and moved windows of lines that stay are kept; refit."""
+        self._set_lines(sel)
+        self.refit()
+
+    def _set_lines(self, sel: dict):
+        keep_c = {self.key(i): t for i, t in self.centers.items() if i < len(self.lines)}
+        keep_x = {self.key(i) for i in self.excluded if i < len(self.lines)}
+        keep_f = {self.key(i) for i in self.forced if i < len(self.lines)}
+        new = lines_from_selection(self.db, self.run, {k: v for k, v in sel.items() if v > 0})
+        if not new:
+            raise ValueError("choose at least one species")
+        # masses as the voltage had them (legacy labels such as 93 keep their GUI mass)
+        mass = {int(lab): m for m, lab, _ in self.lines}
+        self.lines = [(mass.get(int(lab), m), int(lab), int(z)) for m, lab, z in new]
+        key = {(int(lab), int(z)): i for i, (_, lab, z) in enumerate(self.lines)}
+        self.centers = {key[k]: t for k, t in keep_c.items() if k in key}
+        self.excluded = {key[k] for k in keep_x if k in key}
+        self.forced = {key[k] for k in keep_f if k in key}
+
+    def save_defaults(self, fits_root) -> Path:
+        """This voltage's lines, min_snr and peak freedom for every voltage of the run
+        that was not saved by itself (Peaks tab and, for new runs, the peaks stage)."""
+        d = peaks_dir(fits_root, self.run)
+        d.mkdir(parents=True, exist_ok=True)
+        p = d / "defaults.json"
+        p.write_text(json.dumps({"lines": {str(k): v for k, v in self.selection().items()},
+                                 "min_snr": self.min_snr, "mu_bound_s": self.mu_bound,
+                                 "from_U": self.U,
+                                 "saved": time.strftime("%Y-%m-%d %H:%M:%S")}, indent=1),
+                     encoding="utf-8")
+        return p
 
     @property
     def U_used(self) -> float:
@@ -360,7 +441,10 @@ class PeakSession:
                 f"({dt * 1e9:+.0f} ns)" for _, name, kind, dt in ov))
         if r.get("at_edge"):
             out.append("at the edge of the ± search")
-        if r.excluded:
+        if np.isfinite(r.get("snr", np.nan)):
+            out.append(f"S/N {r.snr:.1f}" + (f" < {self.min_snr:g}: left out as noise"
+                                             if r.get("weak") and r.excluded else ""))
+        if r.excluded and i in self.excluded:
             out.append("EXCLUDED")
         return "\n".join(out)
 
@@ -410,12 +494,18 @@ class PeakSession:
         for i, (_m_amu, label, z) in enumerate(self.lines):
             t0 = self.t0(i)
             lk = self.lock(i)
-            f = fit_peak_locked(self.tof, self.y, t0, self.corr,
-                                self.settings.get("window_frac", 0.02),
-                                self.settings.get("mu_bound_s", 150e-9),
+            wf = self.settings.get("window_frac", 0.02)
+            f = fit_peak_locked(self.tof, self.y, t0, self.corr, wf,
+                                min(self.mu_bound, t0 * max(wf + self.corr, 1e-3)),
                                 self.settings.get("min_points", 1), lk.get("mu"), lk.get("B"),
                                 Bt, lk.get("A"))
             common = Bt is not None and "B" not in lk
+            snr = np.nan
+            if f["success"]:
+                nz = local_noise(self.tof, self.y, t0, max(f["sigma"], t0 * wf / 6))
+                snr = abs(f["A"]) / nz if nz > 0 else np.inf
+            weak = bool(f["success"] and self.min_snr > 0 and snr < self.min_snr
+                        and not ({"mu", "A"} & set(lk)))
             row = {"i": i, "m": label, "z": z, "t0": t0, "TOF": f["mu"], "Yield": f["A"],
                    "sigma": f["sigma"], "B": f["B"], "success": bool(f["success"]),
                    "win_lo": f["win_lo"], "win_hi": f["win_hi"],
@@ -424,7 +514,8 @@ class PeakSession:
                    + ("Bc" if common else ""),
                    "common_bg": common,
                    "at_edge": bool(f["success"] and f.get("mu_at_bound", False)),
-                   "excluded": i in self.excluded}
+                   "snr": snr, "weak": weak,
+                   "excluded": i in self.excluded or (weak and i not in self.forced)}
             if f["success"]:
                 vals = [float(np.interp(f["mu"], *self.traces[r])) for r in reps]
                 row.update(YieldAveFit=f["A"], YieldAve=float(np.mean(vals)),
@@ -442,7 +533,14 @@ class PeakSession:
         self.refit()
 
     def exclude(self, i, flag: bool = True):
-        (self.excluded.add if flag else self.excluded.discard)(i)
+        """Exclude line i, or include it again; a line left out for being below the noise
+        cut is kept when included by hand."""
+        if flag:
+            self.excluded.add(i)
+            self.forced.discard(i)
+        else:
+            self.excluded.discard(i)
+            self.forced.add(i)
         self.refit()
 
     def gaussian(self, i, t=None):
@@ -490,11 +588,19 @@ class PeakSession:
                 "auto_centre_k": self.k,
                 "excluded": [list(self.lines[i][1:]) for i in sorted(self.excluded)],
                 "locks": [[a, b, d] for (a, b), d in sorted(self.locks.items())],
+                "lines": {str(k): v for k, v in self.selection().items()},
+                "min_snr": self.min_snr, "mu_bound_s": self.mu_bound,
+                "forced": [list(self.lines[i][1:]) for i in sorted(self.forced)],
                 "common_bg": self.bg,
                 "files": len(self.traces)}
         (d / f"p{_ustr(self.U)}.json").write_text(json.dumps(meta, indent=1, default=str),
                                                   encoding="utf-8")
         return p
+
+
+def _sel_fields(db, run) -> dict:
+    d = selection_defaults(db, run)
+    return {"min_snr": d["min_snr"], "mu_bound": d["mu_bound_s"]}
 
 
 def baseline_path(fits_root, run) -> Path:

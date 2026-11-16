@@ -592,9 +592,68 @@ def update_peak_state(db, key: str, summary: list[dict]) -> tuple[Path, int]:
 # ======================================================================== new runs
 # Runs without legacy results: every voltage fitted from the raw SEM shots.
 
+def local_noise(tof, y, t0: float, width_s: float, span_frac: float = 0.08) -> float:
+    """Noise at the scale of a peak around t0: the signal smoothed over width_s (a box,
+    so point noise is averaged as a fit does but slow waves stay), robust spread
+    (1.4826 x MAD) within +/- span_frac x t0. nan if too few points."""
+    m = (tof >= t0 * (1 - span_frac)) & (tof <= t0 * (1 + span_frac))
+    if m.sum() < 10:
+        return float("nan")
+    x, v = tof[m], y[m]
+    dt = float(np.median(np.diff(x)))
+    n = max(int(round(width_s / dt)), 1) if dt > 0 else 1
+    vs = np.convolve(v, np.ones(n) / n, mode="valid") if n < len(v) // 2 else v
+    return float(1.4826 * np.median(np.abs(vs - np.median(vs))))
+
+
+def selection_defaults(db, run) -> dict:
+    """min_snr and mu_bound_s from [peak_selection] (min_snr 0 for old runs)."""
+    cfg = db.pipeline.get("peak_selection", {})
+    return {"min_snr": float(cfg.get("min_snr", 3.0)) if run.is_new else 0.0,
+            "mu_bound_s": float(cfg.get("mu_bound_s",
+                                        db.pipeline["peaks"].get("mu_bound_s", 150e-9)))}
+
+
+def species_choices(db, run, lines=()) -> list[tuple[str, int, float, int]]:
+    """(species, mass label, m_amu, highest z) a voltage can use: every species of
+    species.toml; the label is the one the run's lines (or [peaks.new_runs]) use, else
+    the species' file label; the highest z is its atomic number Z (else 41)."""
+    labels = {int(lab) for _, lab, _ in lines}
+    nr = {k: int(v) for k, v in db.pipeline["peaks"].get("new_runs", {})
+          .get("labels", {}).items()}
+    gui = {int(k): float(v) for k, v in db.pipeline["peaks"]["gui_masses"].items()}
+    out = []
+    for name, sp in db.species.items():
+        lab = next((x for x in sp.data_labels if x in labels), nr.get(name, sp.file_label))
+        out.append((name, int(lab), gui.get(int(lab), sp.mass_amu), int(sp.Z or 41)))
+    return out
+
+
+def lines_from_selection(db, run, sel: dict) -> list[tuple[float, int, int]]:
+    """(m_amu, label, z) for {label: z max} (z max 0 = species not used), capped at Z."""
+    ch = {lab: (m, zc) for _, lab, m, zc in species_choices(db, run)}
+    gui = {int(k): float(v) for k, v in db.pipeline["peaks"]["gui_masses"].items()}
+    out = []
+    for lab, zm in sel.items():
+        lab = int(lab)
+        m, zc = ch.get(lab, (gui.get(lab, float(lab)), 41))
+        out += [(m, lab, z) for z in range(1, min(int(zm), zc) + 1)]
+    return out
+
+
+def read_line_defaults(fits_root, run) -> dict | None:
+    """The run's Peaks-tab defaults (fits/<run>/peaks/defaults.json) or None."""
+    import json
+    if fits_root is None:
+        return None
+    p = Path(fits_root) / run.key / "peaks" / "defaults.json"
+    return json.loads(p.read_text(encoding="utf-8")) if p.is_file() else None
+
+
 def new_run_lines(db, run) -> list[tuple[float, int, int]]:
     """(m_amu, mass label, z) of every species of the run (spectra_species), z = 1..z_max
-    ([peaks.new_runs] of pipeline.toml, overridden by the run's peaks_z_max)."""
+    ([peaks.new_runs] of pipeline.toml, overridden by the run's peaks_z_max), never above
+    the species' atomic number Z."""
     cfg = db.pipeline["peaks"].get("new_runs", {})
     labels = {k: int(v) for k, v in cfg.get("labels", {}).items()}
     zmax = {int(k): int(v) for k, v in cfg.get("z_max", {}).items()}
@@ -606,7 +665,9 @@ def new_run_lines(db, run) -> list[tuple[float, int, int]]:
         if lab is None or lab not in masses:
             raise KeyError(f"{run.key}: species {sp!r} has no mass label / mass in "
                            "[peaks.new_runs] labels and [peaks.gui_masses]")
-        out += [(masses[lab], lab, z) for z in range(1, zmax.get(lab, 1) + 1)]
+        Z = db.species[sp].Z if sp in db.species else None
+        top = min(zmax.get(lab, 1), Z) if Z else zmax.get(lab, 1)
+        out += [(masses[lab], lab, z) for z in range(1, top + 1)]
     return out
 
 
@@ -635,7 +696,7 @@ def center_factor(tof, y, t0s, window_frac: float, strong_frac: float = 0.2,
     return float(np.median(ratio[strong])), int(strong.sum())
 
 
-def fit_run(db, run, data_root, out_dir: Path, log=None) -> dict:
+def fit_run(db, run, data_root, out_dir: Path, log=None, defaults: dict | None = None) -> dict:
     """
     Peak stage of a new run: for every voltage with raw SEM files, the shots averaged on
     the grid of the longest one, every line of new_run_lines fitted at the file voltage,
@@ -643,6 +704,8 @@ def fit_run(db, run, data_root, out_dir: Path, log=None) -> dict:
     voltage has fewer than 2 strong lines). Writes, in the untitled28 formats,
     out_dir/output/p<U>.txt (m, z, TOF, Yield) and out_dir/output_detail/p<U>.txt
     (+ YieldAveFit, YieldAve, YieldSTDV, Yield1..n), and out_dir/fits.csv (diagnostics).
+    defaults: the run's Peaks-tab defaults (lines {label: z max}, min_snr, mu_bound_s);
+    lines below min_snr x local noise are left out of the output (kept in fits.csv).
     """
     from .acquisition import read_trace, scan_folder
     fmt = run.acquisition.sem
@@ -656,7 +719,10 @@ def fit_run(db, run, data_root, out_dir: Path, log=None) -> dict:
     settings = dict(db.pipeline["peaks"])
     prof = db.profile(db.profile_for(run, "peaks"))
     L = run.eia.L_m
-    lines = new_run_lines(db, run)
+    sel = {**selection_defaults(db, run), **(defaults or {})}
+    lines = (lines_from_selection(db, run, sel["lines"]) if sel.get("lines")
+             else new_run_lines(db, run))
+    min_snr, mu_b = float(sel["min_snr"]), float(sel["mu_bound_s"])
     wf = float(settings.get("window_frac", 0.02))
     nr = settings.get("new_runs", {})
     search = float(nr.get("center_search_frac", 0.03))     # where the strong lines are sought
@@ -682,11 +748,16 @@ def fit_run(db, run, data_root, out_dir: Path, log=None) -> dict:
         rows = []
         for m_amu, label, z in lines:
             t0 = predicted_tof(m_amu, z, U, L, run.eia, prof) * k_used
-            f = fit_peak(tof, y, t0, 0.0, wf, settings.get("mu_bound_s", 150e-9),
+            f = fit_peak(tof, y, t0, 0.0, wf, min(mu_b, t0 * wf),
                          settings.get("min_points", 4))
+            snr = np.nan
+            if f["success"]:
+                nz = local_noise(tof, y, t0, max(f["sigma"], t0 * wf / 6))
+                snr = abs(f["A"]) / nz if nz > 0 else np.inf
             r = {"U": U, "m": label, "z": z, "t0": t0, "k": k_used, "TOF": f["mu"],
                  "Yield": f["A"], "sigma": f["sigma"], "B": f["B"], "success": f["success"],
-                 "mu_at_bound": f["mu_at_bound"], "A_at_bound": f["A_at_bound"]}
+                 "mu_at_bound": f["mu_at_bound"], "A_at_bound": f["A_at_bound"],
+                 "snr": snr, "weak": bool(f["success"] and min_snr > 0 and snr < min_snr)}
             if f["success"]:
                 vals = [float(np.interp(f["mu"], *traces[q])) for q in reps]
                 r.update(YieldAveFit=f["A"], YieldAve=float(np.mean(vals)),
@@ -695,18 +766,21 @@ def fit_run(db, run, data_root, out_dir: Path, log=None) -> dict:
             rows.append(r)
         df = pd.DataFrame(rows)
         diag.append(df)
-        ok = df[df.success]
+        ok = df[df.success & ~df.weak]
         name = f"p{U:g}.txt" if float(U) != int(U) else f"p{int(U)}.txt"
         ok[["m", "z", "TOF", "Yield"]].to_csv(out_dir / "output" / name, index=False)
         shot_cols = [c for c in ok.columns if c.startswith("Yield") and c[5:].isdigit()]
         ok[["m", "z", "TOF", "YieldAveFit", "YieldAve", "YieldSTDV", *shot_cols]].to_csv(
             out_dir / "output_detail" / name, index=False)
         if log:
-            log(f"  U = {U:g} V: {len(ok)}/{len(df)} lines, k = {k_used:.4f}"
+            log(f"  U = {U:g} V: {len(ok)}/{len(df)} lines ({int(df.weak.sum())} below "
+                f"S/N {min_snr:g}), k = {k_used:.4f}"
                 f"{'' if k_used == k else ' (run median)'}")
     allf = pd.concat(diag, ignore_index=True)
     allf.to_csv(out_dir / "fits.csv", index=False)
     return {"voltages": len(avgs), "lines_fitted": int(allf.success.sum()),
-            "lines_total": len(allf), "k_run": k_run,
+            "lines_total": len(allf), "lines_below_snr": int(allf.weak.sum()),
+            "min_snr": min_snr, "mu_bound_ns": mu_b * 1e9, "k_run": k_run,
+            "lines_from": "Peaks-tab defaults" if sel.get("lines") else "pipeline.toml",
             "k_from_strong_lines": int(sum(np.isfinite(k) for k, _ in ks.values())),
             "mu_at_bound": int((allf.success & allf.mu_at_bound).sum())}

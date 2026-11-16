@@ -103,6 +103,19 @@ def test_window_tabs_and_cbs_fitter(tmp_path, monkeypatch):
     assert "total (sum of all lines)" in labels
     tot = pk.s.total_curve()
     assert tot is not None and tot.shape == pk.s.tof.shape
+    # line chooser: add carbon up to 6+, noise cut on, then back
+    n0 = len(pk.s.lines)
+    cb, sp = pk.line_rows[12]
+    cb.setChecked(True)
+    sp.setValue(6)
+    assert len(pk.s.lines) == n0 + 6 and pk.table.rowCount() == n0 + 6
+    pk.snr.setValue(3)
+    assert pk.s.min_snr == 3 and pk.s.fits.weak.any()
+    noise = [pk.table.item(k, pk.COLS.index("excluded")).text() for k in range(n0 + 6)]
+    assert "noise" in noise
+    cb.setChecked(False)
+    pk.snr.setValue(0)
+    assert len(pk.s.lines) == n0
     # common background: 2 points, a tuning point, remove it; negative Corr
     def click(t_us, v):
         X, Y = pk.ax.transData.transform((t_us, v))
