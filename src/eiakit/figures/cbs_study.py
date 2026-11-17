@@ -118,19 +118,31 @@ def area_fwhm(tab, energy_mJ) -> Figure:
     return fig
 
 
-def fit_summary(tab, avg_components: dict, energies=(180, 370, 780)) -> Figure:
-    """All conditions: fitted peak velocity per z, bar = FWHM of the fitted distribution
-    (half-maximum points at t -/+ FWHM/2, asymmetric in u)."""
-    fig = Figure(rows=2, cols=len(energies), size_in=(6.8, 4.4), height_px=760, letters=True,
+def _pick_bounds(r):
+    """u at the picked half-maximum points (t_left_pick -> higher u, t_right_pick ->
+    lower u); no bar where a pick is missing."""
+    u = r.u_fit.to_numpy(float)
+    ul, ur = r.u_left.to_numpy(float), r.u_right.to_numpy(float)
+    return np.where(np.isfinite(ur), ur, u), np.where(np.isfinite(ul), ul, u)
+
+
+def fit_summary(tab, avg_components: dict, energies=(180, 370, 780),
+                bars: str = "picks", labels: dict | None = None) -> Figure:
+    """All conditions: fitted peak velocity per z (peak of the fitted CBS function).
+    bars 'picks': the picked half-maximum points (FWHM picked in the fitter);
+    'fit': the FWHM of the fitted function (t -/+ FWHM/2). Both asymmetric in u.
+    labels: energy -> column label (e.g. '3.3 mJ (ps)')."""
+    n = len(energies)
+    fig = Figure(rows=2, cols=n, size_in=(6.8 * n / 3, 4.4), height_px=760, letters=True,
                  legend="figure")
     t = tab[~tab.excluded]
     for i, el in enumerate(["Al", "Nb"]):
         for j, mj in enumerate(energies):
             p = fig.panel(i, j)
-            p.title = f"{el}, {mj} mJ"
+            p.title = f"{el}, " + ((labels or {}).get(mj) or f"{mj:g} mJ")
             p.xlabel = Z_LABEL
             p.ylabel = lab(r"Fit peak  $u$  (km/s)", "Fit peak u (km/s)") if j == 0 else None
-            g = t[(t.species == el) & (t.energy_mJ == mj)]
+            g = t[(t.species == el) & np.isclose(t.energy_mJ.astype(float), mj)]
             if g.empty:
                 p.empty_text = "no data"
                 continue
@@ -138,14 +150,10 @@ def fit_summary(tab, avg_components: dict, energies=(180, 370, 780)) -> Figure:
                 r = g[g.component == c].sort_values("z")
                 if r.empty:
                     continue
-                u, tt = r.u_fit.to_numpy(float), r.t_peak_fit_us.to_numpy(float)
-                half = r.FWHM_fit_us.to_numpy(float) / 2 if "FWHM_fit_us" in r else 0 * u
-                with np.errstate(divide="ignore", invalid="ignore"):
-                    ul = np.where(tt - half > 0, u * tt / (tt - half), np.nan)
-                    ur = u * tt / (tt + half)
+                u = r.u_fit.to_numpy(float)
+                lo, hi = _pick_bounds(r) if bars == "picks" else _fwhm_bounds(r)
                 p.add(ErrorBars(r.z.to_numpy(float), u, COMPONENT_NAMES.get(c, c),
-                                COLORS.get(c, "gray"), ylo=np.nan_to_num(ur, nan=u),
-                                yhi=np.nan_to_num(ul, nan=u), marker=MARKERS.get(c, "o"),
-                                size=4, group=c))
+                                COLORS.get(c, "gray"), ylo=lo, yhi=hi,
+                                marker=MARKERS.get(c, "o"), size=4, group=c))
             _mean_lines(p, g, avg_components.get(el, []), "u_fit")
     return fig

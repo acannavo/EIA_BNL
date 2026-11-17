@@ -91,3 +91,25 @@ def test_saved_voltage_reopens_as_saved(tmp_path, monkeypatch):
     assert s2.restore(tmp_path)
     assert (s2.u_clicks, s2.corr, s2.excluded) == (-7, 0.005, {1})
     assert (s2.fits[["m", "z", "TOF", "Yield"]].to_numpy() == want.to_numpy()).all()
+
+
+def test_extra_condition_column_and_pick_bars():
+    from types import SimpleNamespace
+
+    import numpy as np
+    import pandas as pd
+
+    from eiakit.figures import cbs_study as cf
+    from eiakit.figures.powerlaw import _grid
+    recs = [{"ds": SimpleNamespace(species=el, energy_mJ=mj)}
+            for el in ("Al", "Nb") for mj in (180.0, 370.0, 780.0, 3.3)]
+    g, els, ens = _grid(recs)
+    assert ens == (180, 370, 780, 3.3) and g[0][3]["ds"].energy_mJ == 3.3
+    tab = pd.DataFrame({"species": "Al", "energy_mJ": 3.3, "component": "fast", "z": [1, 2],
+                        "u_fit": [300.0, 310.0], "u_left": [340.0, np.nan],
+                        "u_right": [270.0, np.nan], "t_peak_fit_us": [10.0, 9.0],
+                        "FWHM_fit_us": [2.0, 2.0], "excluded": False})
+    lo, hi = cf._pick_bounds(tab)
+    assert list(lo) == [270.0, 310.0] and list(hi) == [340.0, 310.0]   # no pick: no bar
+    f = cf.fit_summary(tab, {"Al": ["fast"]}, [180.0, 3.3], "picks", {3.3: "3.3 mJ (ps)"})
+    assert f.panel(0, 1).title == "Al, 3.3 mJ (ps)"

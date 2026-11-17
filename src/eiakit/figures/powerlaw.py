@@ -13,15 +13,34 @@ SHEIL_Y = lab(r"$d^2N/dE\,d\Omega$  (/eV/sr/shot)", "d²N/dE dΩ (/eV/sr/shot)")
 REF = (0.3, 0.4)                                   # Sheil et al., PRL 133, 125101 (Sn)
 
 
-def _grid(records, elements=("Al", "Nb"), energies=(180, 370, 780)):
-    look = {(r["ds"].species, int(round(r["ds"].energy_mJ or 0))): r for r in records}
-    return [[look.get((el, mj)) for mj in energies] for el in elements], elements, energies
+BASE_ENERGIES = (180, 370, 780)
+
+
+def _ekey(mj) -> float:
+    return round(float(mj or 0), 3)
+
+
+def _grid(records, elements=("Al", "Nb"), energies=None):
+    """rows = elements, columns = the 180 / 370 / 780 mJ conditions, then any other
+    energy among the records (extra runs, e.g. the 3.3 mJ ps runs) in an extra column."""
+    if energies is None:
+        extra = sorted({_ekey(r["ds"].energy_mJ) for r in records} - set(BASE_ENERGIES))
+        energies = (*BASE_ENERGIES, *extra)
+    look = {(r["ds"].species, _ekey(r["ds"].energy_mJ)): r for r in records}
+    return ([[look.get((el, _ekey(mj))) for mj in energies] for el in elements], elements,
+            tuple(energies))
+
+
+def _w(width3: float, ens) -> float:
+    """Figure width for len(ens) columns (width3 = the 3-column width)."""
+    return width3 * len(ens) / 3
 
 
 def zbar_grid(records, ref=REF) -> Figure:
-    """2 x 3: zbar(E) data, power-law fit, Sheil reference (rows Al / Nb)."""
+    """2 x 3 (+ extra columns): zbar(E) data, power-law fit, Sheil reference (rows Al / Nb)."""
     g, els, ens = _grid(records)
-    fig = Figure(rows=2, cols=3, size_in=(16, 9), sharex=True, sharey=True, letters=True,
+    fig = Figure(rows=2, cols=len(ens), size_in=(_w(16, ens), 9), sharex=True, sharey=True,
+                 letters=True,
                  title=lab(r"Average charge state $\bar z$ vs kinetic energy",
                            "Average charge state z̄ vs kinetic energy"), legend="panel")
     vr = [r["zb"]["E_eV"][r["zb"]["valid"]] for r in records if r["zb"]["valid"].any()]
@@ -34,7 +53,7 @@ def zbar_grid(records, ref=REF) -> Figure:
             p.xlabel, p.ylabel = E_EV, ZBAR
             rec = g[i][j]
             if rec is None:
-                p.empty_text = f"{el}, {mj} mJ: not available"
+                p.empty_text = f"{el}, {mj:g} mJ: not available"
                 continue
             zb, fit = rec["zb"], rec["fit"]
             v = zb["valid"]
@@ -85,7 +104,8 @@ def sheil_grid(records, ylim=(1e5, 1e12)) -> Figure:
     """2 x 3 in the style of Sheil et al. Fig. 1b: d2N/dE dOmega per z, total (dashed),
     zbar (red, right axis)."""
     g, els, ens = _grid(records)
-    fig = Figure(rows=2, cols=3, size_in=(17, 10), letters=True, legend="figure")
+    fig = Figure(rows=2, cols=len(ens), size_in=(_w(17, ens), 10), letters=True,
+                 legend="figure")
     for i, el in enumerate(els):
         for j, mj in enumerate(ens):
             p = fig.panel(i, j)
@@ -94,7 +114,7 @@ def sheil_grid(records, ylim=(1e5, 1e12)) -> Figure:
             p.y2label = ZBAR if j == len(ens) - 1 else None
             rec = g[i][j]
             if rec is None:
-                p.empty_text = f"{el}, {mj} mJ: not available"
+                p.empty_text = f"{el}, {mj:g} mJ: not available"
                 continue
             S, zb = rec["S"], rec["zb"]
             p.title = rec["ds"].title
@@ -132,7 +152,8 @@ def spectra_grid(records, domain: str = "tof") -> Figure:
            "dlnE": (E_EV, lab(r"$dN/d\ln E$  [ions cm$^{-2}$]", "dN/dlnE [ions cm⁻²]"), True),
            "energy": (E_EV, lab(r"$dN/dE$  [ions cm$^{-2}$ eV$^{-1}$]",
                                 "dN/dE [ions cm⁻² eV⁻¹]"), True)}[domain]
-    fig = Figure(rows=2, cols=3, size_in=(16, 9), letters=True, legend="figure")
+    fig = Figure(rows=2, cols=len(ens), size_in=(_w(16, ens), 9), letters=True,
+                 legend="figure")
     for i, el in enumerate(els):
         for j, mj in enumerate(ens):
             p = fig.panel(i, j)
@@ -141,7 +162,7 @@ def spectra_grid(records, domain: str = "tof") -> Figure:
             p.xlog = lbl[2]
             rec = g[i][j]
             if rec is None:
-                p.empty_text = f"{el}, {mj} mJ: not available"
+                p.empty_text = f"{el}, {mj:g} mJ: not available"
                 continue
             ds = rec["ds"]
             p.title = ds.title

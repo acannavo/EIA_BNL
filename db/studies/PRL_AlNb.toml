@@ -6,11 +6,11 @@
 # ==========================================================================
 
 name        = "PRL_AlNb"
-description = "Al and Nb, ns laser 180 / 370 / 780 mJ (2025), optional ps Nb run (2026_1103)"
+description = "Al and Nb, ns laser 180 / 370 / 780 mJ (2025), ps Al and Nb runs 3.3 mJ (2026)"
 
 runs        = ["20250513", "20250602", "20250606", "20250611", "20250623", "20250617"]
-extra_runs  = ["2026_1103 Nb analysis"]   # shown in an extra column when include_extra = true
-include_extra = false                     # false = the original 2 x 3 figures
+extra_runs  = ["2026_1103 Nb analysis", "2026_1110 Al analysis"]   # ps, 3.3 mJ: extra column
+include_extra = true                      # false = the original 2 x 3 figures
 
 # grid layout: rows = target element, columns = laser energy
 rows           = ["Al", "Nb"]
@@ -20,7 +20,9 @@ column_energy_mJ = [180.0, 370.0, 780.0]
 avg_components = { Al = ["fast", "ultra_fast"], Nb = ["fast"] }
 
 [zbar]
-# power-law fit window of zbar(E) [eV]; missing bound = open
+# power-law fit window of zbar(E) [eV]; missing bound = open. Keys: element (Al, Nb) or
+# one condition (Al_780mJ, "Al_3.3mJ", ...; the condition wins). The ps runs use the
+# element values, like the ns runs.
 e_max_eV       = { Al = 1.0e4, Nb = 3.1e4 }
 lower_from_z   = 2              # lower edge raised to where this z starts
 reference      = "sheil_2024_sn"

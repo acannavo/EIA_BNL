@@ -139,9 +139,10 @@ def cbs(db, study_name, data_root, processed, studies_root, source="pipeline",
     st = db.study(study_name)
     out = Path(studies_root) / study_name / "cbs"
     out.mkdir(parents=True, exist_ok=True)
-    tab = study_components(db, study_name, data_root, processed, source)
+    tab = study_components(db, study_name, data_root, processed, source,
+                           include_extra=st.include_extra)
     upstream = {}
-    for key in st.runs:
+    for key in st.all_runs():
         m = read_manifest(processed, db.run(key), STAGES["cbs"]) if source == "pipeline" \
             else None
         upstream[key] = m["run_id"] if m else f"legacy:{source}"
@@ -158,8 +159,16 @@ def cbs(db, study_name, data_root, processed, studies_root, source="pipeline",
         figs[f"velocity_{mj:g}mJ"] = cf.velocity(tab, mj, st.avg_components, "velocity")
         figs[f"picks_{mj:g}mJ"] = cf.velocity(tab, mj, st.avg_components, "picks")
         figs[f"area_fwhm_{mj:g}mJ"] = cf.area_fwhm(tab, mj)
-    figs["fit_summary"] = cf.fit_summary(tab, st.avg_components,
-                                        sorted(int(e) for e in energies))
+    base = sorted(e for e in energies if e in st.column_energy_mJ)
+    cols = base + sorted(e for e in energies if e not in st.column_energy_mJ)
+    labels = {}
+    for key in st.all_runs():
+        r = db.run(key)
+        mj = r.laser.energy_mJ
+        if mj is not None and getattr(r.laser, "pulse", None):
+            labels[float(mj)] = f"{mj:g} mJ ({r.laser.pulse})"
+    figs["fit_summary"] = cf.fit_summary(tab, st.avg_components, cols, "picks", labels)
+    figs["fit_summary_fwhm"] = cf.fit_summary(tab, st.avg_components, cols, "fit", labels)
     for name, f in figs.items():
         if formats:
             save(f, out / name, formats=formats)
@@ -171,9 +180,13 @@ def cbs(db, study_name, data_root, processed, studies_root, source="pipeline",
     for mj in energies:
         items += [("h2", f"{mj:g} mJ"), figs[f"velocity_{mj:g}mJ"], figs[f"picks_{mj:g}mJ"],
                   figs[f"area_fwhm_{mj:g}mJ"]]
-    items += [("h2", "Fit peak and width, all conditions"), figs["fit_summary"]]
+    items += [("h2", "Fit peak and width, all conditions"),
+              ("p", "Points: peak of the fitted CBS function. Bars, first figure: the "
+                    "half-maximum points picked in the fitter (picked FWHM); second figure: "
+                    "the FWHM of the fitted function. u = L/t, so the bars are asymmetric."),
+              figs["fit_summary"], figs["fit_summary_fwhm"]]
     meta = (f"eiakit {__version__}, git {git_commit()}, {time.strftime('%Y-%m-%d %H:%M')}"
-            f"; runs: {', '.join(st.runs)}")
+            f"; runs: {', '.join(st.all_runs())}")
     write_html_page(out / "cbs.html", f"{study_name}: CBS components", items, meta)
     man = {"study": study_name, "part": "cbs", "source": source,
            "created": time.strftime("%Y-%m-%d %H:%M:%S"), "eiakit": __version__,

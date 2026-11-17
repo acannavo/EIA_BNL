@@ -19,7 +19,9 @@ def z_color(z: int) -> str:
 
 
 def energy_color(mj) -> str:
-    return ENERGY_COLORS.get(int(round(mj)) if mj is not None else None, "#7f7f7f")
+    if mj is None:
+        return "#7f7f7f"
+    return ENERGY_COLORS.get(int(round(mj)), "#9467bd" if mj < 50 else "#7f7f7f")  # ps: purple
 
 
 PRL_RC = {
