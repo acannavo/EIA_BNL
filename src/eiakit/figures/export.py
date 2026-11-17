@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import html as _html
+import os
+import time
 from pathlib import Path
 
 from .render_mpl import to_matplotlib
@@ -18,13 +20,35 @@ def save(fig, base: Path, formats=("pdf", "png", "html"), dpi: int = 200,
         for f in ("pdf", "png"):
             if f in formats:
                 p = base.with_suffix(f".{f}")
-                m.savefig(p, dpi=dpi, bbox_inches="tight")
-                out.append(p)
+                out.append(_savefig(m, p, dpi))
     if "html" in formats:
         p = base.with_suffix(".html")
         write_html_page(p, str(base.name), [fig])
         out.append(p)
     return out
+
+
+def _savefig(m, p: Path, dpi: int) -> Path:
+    """Save to a temporary file next to p, then replace p. On Windows / OneDrive the
+    target can be briefly locked (open in a viewer, being synced: 'Errno 22 Invalid
+    argument' or 'Permission denied'): retry, and if it stays locked keep the new
+    figure as <name>.new.<ext> with a warning instead of stopping the study."""
+    tmp = p.with_name(p.stem + ".tmp" + p.suffix)
+    m.savefig(tmp, dpi=dpi, bbox_inches="tight")
+    for i in range(6):
+        try:
+            os.replace(tmp, p)
+            return p
+        except OSError:
+            time.sleep(0.5 * (i + 1))
+    alt = p.with_name(p.stem + ".new" + p.suffix)
+    try:
+        os.replace(tmp, alt)
+    except OSError:
+        alt = tmp
+    print(f"  WARNING {p.name} is locked (open in another program or being synced by "
+          f"OneDrive): the new figure is {alt.name}; close the file and run again")
+    return alt
 
 
 def figure_div(fig, include_js: bool) -> str:

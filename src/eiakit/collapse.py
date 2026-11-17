@@ -87,9 +87,11 @@ def cbs_peaks(db, run, data_root, t_source: str = "exp") -> pd.DataFrame:
         comp = names.get(c.cbs)
         if comp not in ("fast", "slow", "ultra_fast") or not np.isfinite(c.kT):
             continue
-        tr = c.triplet
+        tr = c.triplet or {}
         t_pk = tr.get("PEAK", {}).get("t", np.nan) if t_source == "exp" else \
             c.picks.get("t_peak", np.nan)
+        if not np.isfinite(t_pk):                  # CBS-fitter fit: no raw peak samples
+            t_pk = (c.picks or {}).get("t_peak", np.nan)
         if not np.isfinite(t_pk):
             continue
         rows.append(dict(run=run.key, element=run.target, energy_mJ=run.laser.energy_mJ,

@@ -1867,6 +1867,10 @@ class MainWindow(QMainWindow):
         self.settings.refresh()
 
     def after_command(self):
+        try:                                       # the TOML files may have been edited
+            self.db = load_database()
+        except Exception as e:                     # noqa: BLE001 - keep the old one
+            self.log.appendPlainText(f"database not reloaded: {e}")
         self.runs.refresh()
         self.studies.refresh()
 

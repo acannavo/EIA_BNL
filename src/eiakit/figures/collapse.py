@@ -40,16 +40,26 @@ def collapse(series: list, joint: dict, literature: list, title: str) -> Figure:
     return fig
 
 
-def peak_check(datasets: list, peaks, height: float = 2.5, xlim=(5, 850)) -> Figure:
-    """Stacked J_z(t)^(1/2), normalised per z and offset by z, with the peaks used."""
-    order = sorted(datasets, key=lambda d: (d.species, d.energy_mJ or 0))
-    ncol = 3
-    rows = int(np.ceil(len(order) / ncol))
-    fig = Figure(rows=rows, cols=ncol, size_in=(15, 6 * rows), height_px=650 * rows,
+def peak_check(datasets: list, peaks, height: float = 2.5, xlim=(5, 850),
+               columns=None) -> Figure:
+    """Stacked J_z(t)^(1/2), normalised per z and offset by z, with the peaks used.
+    Rows = elements, columns = conditions (columns: energies in order, e.g. the study's
+    column_energy_mJ; others appended)."""
+    els = sorted({d.species for d in datasets})
+    ens = list(columns or [])
+    ens += sorted({float(d.energy_mJ or 0) for d in datasets} - {float(e) for e in ens})
+    ens = [e for e in ens if any(np.isclose(float(d.energy_mJ or 0), e) for d in datasets)]
+    ncol, rows = max(len(ens), 1), len(els)
+    fig = Figure(rows=rows, cols=ncol, size_in=(5 * ncol, 6 * rows), height_px=650 * rows,
                  legend="figure", letters=True)
+    pos = {}
+    for d in datasets:
+        j = next(k for k, e in enumerate(ens) if np.isclose(float(d.energy_mJ or 0), e))
+        pos[d.key] = (els.index(d.species), j)
+    order = sorted(datasets, key=lambda d: pos[d.key])
     mk = {"fast": ("#e6194b", "o"), "slow": ("#3cb44b", "s"), "ultra_fast": ("#4363d8", "^")}
-    for k, ds in enumerate(order):
-        p = fig.panel(k // ncol, k % ncol)
+    for ds in order:
+        p = fig.panel(*pos[ds.key])
         p.title, p.xlog = ds.title, True
         p.xlabel = lab(r"Time of flight  $t$  [$\mu$s]", "Time of flight t [µs]")
         p.ylabel = lab(r"$z$ + $\sqrt{J_z/J_{z,max}}$ (offset)", "z + sqrt(J_z / max)")

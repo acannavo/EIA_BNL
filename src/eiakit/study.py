@@ -160,7 +160,7 @@ def cbs(db, study_name, data_root, processed, studies_root, source="pipeline",
         figs[f"velocity_{mj:g}mJ"] = cf.velocity(tab, mj, st.avg_components, "velocity")
         figs[f"picks_{mj:g}mJ"] = cf.velocity(tab, mj, st.avg_components, "picks")
         figs[f"area_fwhm_{mj:g}mJ"] = cf.area_fwhm(tab, mj)
-    base = sorted(e for e in energies if e in st.column_energy_mJ)
+    base = [e for e in st.column_energy_mJ if e in energies]        # study column order
     cols = base + sorted(e for e in energies if e not in st.column_energy_mJ)
     labels = {}
     for key in st.all_runs():
@@ -302,7 +302,8 @@ def collapse(db, study_name, data_root, processed, studies_root, source="pipelin
         fits.append({"source": src, "run": "joint", "zstar": j["zstar"], "se_zstar": j["se"],
                      "rms_pct": j["rms_pct"], "n_datasets": j["n"]})
         figs[f"collapse_{src}"] = cf.collapse(ser, j, lit, f"Collapse: {title}")
-        figs[f"peak_check_{src}"] = cf.peak_check(dsets, peaks[src])
+        figs[f"peak_check_{src}"] = cf.peak_check(dsets, peaks[src],
+                                                  columns=st.column_energy_mJ)
     for L in lit:
         log(f"  {L['label']}: z* = {L['zstar']:.2f} +/- {L['se_zstar']:.2f}, R2 = {L['R2']:.3f}")
         fits.append({"source": "literature", "run": L["key"], "zstar": L["zstar"],

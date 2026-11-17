@@ -131,3 +131,35 @@ def test_study_cbs_status_counts_extra_runs(tmp_path, monkeypatch):
            "upstream": {k: "x" for k in st.all_runs()}}
     (d / "manifest.json").write_text(json.dumps(man))
     assert S.study_status(db, "PRL_AlNb", "cbs", None, None, tmp_path)["state"] == "ok"
+
+
+def test_peak_check_columns_and_locked_save(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    import numpy as np
+    import pandas as pd
+
+    from eiakit.figures import export
+    from eiakit.figures.collapse import peak_check
+    t = np.geomspace(5, 500, 200)
+    ds = [SimpleNamespace(key=f"{el}{mj}", species=el, energy_mJ=mj, title=f"{el}, {mj:g} mJ",
+                          all_z=[1, 2], tof_us=t,
+                          z_curves={1: np.exp(-(t - 50) ** 2 / 50), 2: np.exp(-(t - 30) ** 2 / 50)})
+          for el in ("Al", "Nb") for mj in (3.3, 180.0, 370.0, 780.0)]
+    pk = pd.DataFrame(columns=["run", "z", "component", "t_peak"])
+    f = peak_check(ds, pk, columns=[180.0, 370.0, 780.0, 3.3])
+    assert (f.rows, f.cols) == (2, 4)
+    assert f.panel(0, 3).title == "Al, 3.3 mJ" and f.panel(1, 0).title == "Nb, 180 mJ"
+    # a locked target (OneDrive / viewer): kept as .new, no crash
+    calls = {"n": 0}
+    real = export.os.replace
+
+    def locked(src, dst):
+        if str(dst).endswith("fig.png"):
+            calls["n"] += 1
+            raise OSError(22, "Invalid argument")
+        return real(src, dst)
+    monkeypatch.setattr(export.os, "replace", locked)
+    monkeypatch.setattr(export.time, "sleep", lambda s: None)
+    out = export.save(f, tmp_path / "fig", formats=("png",))
+    assert out[0].name == "fig.new.png" and out[0].is_file() and calls["n"] == 6

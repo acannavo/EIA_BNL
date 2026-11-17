@@ -8,13 +8,14 @@
 name        = "PRL_AlNb"
 description = "Al and Nb, ns laser 180 / 370 / 780 mJ (2025), ps Al and Nb runs 3.3 mJ (2026)"
 
-runs        = ["20250513", "20250602", "20250606", "20250611", "20250623", "20250617"]
-extra_runs  = ["2026_1103 Nb analysis", "2026_1110 Al analysis"]   # ps, 3.3 mJ: extra column
-include_extra = true                      # false = the original 2 x 3 figures
+runs        = ["20250513", "20250602", "20250606", "20250611", "20250623", "20250617",
+               "2026_1110 Al analysis", "2026_1103 Nb analysis"]          # last two: ps
+extra_runs  = []                          # runs shown only when include_extra = true
+include_extra = false
 
 # grid layout: rows = target element, columns = laser energy
 rows           = ["Al", "Nb"]
-column_energy_mJ = [180.0, 370.0, 780.0]
+column_energy_mJ = [180.0, 370.0, 780.0, 3.3]   # 3.3 mJ = the ps runs
 
 # components with a horizontal mean +/- std line (velocity figures)
 avg_components = { Al = ["fast", "ultra_fast"], Nb = ["fast"] }
