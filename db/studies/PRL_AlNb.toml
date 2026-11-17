@@ -24,7 +24,9 @@ avg_components = { Al = ["fast", "ultra_fast"], Nb = ["fast"] }
 # one condition (Al_780mJ, "Al_3.3mJ", ...; the condition wins). The ps runs use the
 # element values, like the ns runs.
 e_max_eV       = { Al = 1.0e4, Nb = 3.1e4 }
+e_min_eV       = { "Al_3.3mJ" = 97.5, "Nb_3.3mJ" = 130.0 }   # ps runs only
 lower_from_z   = 2              # lower edge raised to where this z starts
+                                # (with e_min_eV: the higher of the two)
 reference      = "sheil_2024_sn"
 
 [collapse]
