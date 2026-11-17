@@ -163,3 +163,23 @@ def test_peak_check_columns_and_locked_save(tmp_path, monkeypatch):
     monkeypatch.setattr(export.time, "sleep", lambda s: None)
     out = export.save(f, tmp_path / "fig", formats=("png",))
     assert out[0].name == "fig.new.png" and out[0].is_file() and calls["n"] == 6
+
+
+def test_peak_check_time_axis_follows_the_data():
+    from types import SimpleNamespace
+
+    import numpy as np
+    import pandas as pd
+
+    from eiakit.figures.collapse import peak_check
+    t = np.geomspace(0.5, 900, 400)
+    ps = SimpleNamespace(key="ps", species="Nb", energy_mJ=3.3, title="Nb, 3.3 mJ", all_z=[1],
+                         tof_us=t, z_curves={1: np.exp(-(np.log(t / 2.0)) ** 2 / 0.05)})
+    ns = SimpleNamespace(key="ns", species="Nb", energy_mJ=780.0, title="Nb, 780 mJ",
+                         all_z=[1], tof_us=t, z_curves={1: np.exp(-(np.log(t / 60)) ** 2 / 0.1)})
+    pk = pd.DataFrame({"run": ["ps"], "z": [1], "component": ["slow"], "t_peak": [2.0]})
+    f = peak_check([ps, ns], pk, columns=[780.0, 3.3])
+    lo, hi = f.panel(0, 1).xlim                 # ps: signal around 2 us, not cut at 5 us
+    assert lo < 1.5 and hi < 10
+    lo2, hi2 = f.panel(0, 0).xlim
+    assert 10 < lo2 < 60 < hi2

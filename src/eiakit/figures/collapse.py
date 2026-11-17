@@ -40,11 +40,27 @@ def collapse(series: list, joint: dict, literature: list, title: str) -> Figure:
     return fig
 
 
-def peak_check(datasets: list, peaks, height: float = 2.5, xlim=(5, 850),
+def _time_range(ds, frac: float = 1e-3) -> tuple[float, float] | None:
+    """Time span where any J_z(t) of the dataset exceeds frac x its maximum, widened by
+    a factor 1.25 on the log axis (setups with other flight paths: ps runs at 1.22 m)."""
+    t = np.asarray(ds.tof_us, float)
+    on = np.zeros(len(t), bool)
+    for z in ds.all_z:
+        y = np.clip(np.asarray(ds.z_curves[z], float), 0, None)
+        if y.max() > 0:
+            on |= y > frac * y.max()
+    on &= t > 0
+    if not on.any():
+        return None
+    return float(t[on].min() / 1.25), float(t[on].max() * 1.25)
+
+
+def peak_check(datasets: list, peaks, height: float = 2.5, xlim=None,
                columns=None) -> Figure:
     """Stacked J_z(t)^(1/2), normalised per z and offset by z, with the peaks used.
     Rows = elements, columns = conditions (columns: energies in order, e.g. the study's
-    column_energy_mJ; others appended)."""
+    column_energy_mJ; others appended). xlim None: each panel spans its own data (and
+    the peaks shown); a tuple fixes every panel."""
     els = sorted({d.species for d in datasets})
     ens = list(columns or [])
     ens += sorted({float(d.energy_mJ or 0) for d in datasets} - {float(e) for e in ens})
@@ -63,8 +79,14 @@ def peak_check(datasets: list, peaks, height: float = 2.5, xlim=(5, 850),
         p.title, p.xlog = ds.title, True
         p.xlabel = lab(r"Time of flight  $t$  [$\mu$s]", "Time of flight t [µs]")
         p.ylabel = lab(r"$z$ + $\sqrt{J_z/J_{z,max}}$ (offset)", "z + sqrt(J_z / max)")
-        p.xlim = xlim
         sub = peaks[peaks.run == ds.key]
+        rng = xlim or _time_range(ds)
+        if rng is not None and xlim is None and len(sub):
+            tp = sub.t_peak.to_numpy(float)
+            tp = tp[np.isfinite(tp) & (tp > 0)]
+            if len(tp):
+                rng = (min(rng[0], tp.min() / 1.25), max(rng[1], tp.max() * 1.25))
+        p.xlim = rng
         for z in ds.all_z:
             y = np.clip(ds.z_curves[z], 0, None)
             if y.max() <= 0:
