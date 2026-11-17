@@ -40,6 +40,7 @@ class CBSSession:
     source: str
     dirty: set = field(default_factory=set)
     exp_U: dict = field(default_factory=dict)  # z -> voltage of every measured point (exp)
+    peaks_newer: list = field(default_factory=list)  # voltages saved after the calibration
 
     # ---------------------------------------------------------------- load
     @classmethod
@@ -63,7 +64,10 @@ class CBSSession:
         src = ("new run, no CBS fit yet: Seed / Add components" if rm.get("empty") else
                ("store " if rm.get("from_store") else "legacy ") + str(rm["fit_path"]))
         s = cls(db, run, rm["model"], rm["curves"], rm["exp"], comps, src)
-        s.exp_U = point_voltages(db, run, data_root, rm["exp"])
+        from .cbs import exp_voltages
+        ev = exp_voltages(ck, run.mass_labels) if ck is not None else None
+        s.exp_U = ev if ev is not None else point_voltages(db, run, data_root, rm["exp"])
+        s.peaks_newer = peaks_newer_than_calibration(run, processed)
         return s
 
     # ---------------------------------------------------------------- views
@@ -384,6 +388,26 @@ class CBSSession:
                         source=f"eiakit CBS fitter (from {self.source})", note=note)
         self.dirty.clear()
         return p
+
+
+def peaks_newer_than_calibration(run, processed) -> list[float]:
+    """Voltages saved in the Peaks tab after the calibration (spectra.h5) was written:
+    the CBS points of those voltages are out of date until the run is run again."""
+    from pathlib import Path
+
+    from .cbs_store import default_fits_root
+    from .peaks_edit import override_files
+    if processed is None:
+        return []
+    h5 = Path(processed) / run.key / "20_calibration" / "spectra.h5"
+    if not h5.is_file():
+        return []
+    t = h5.stat().st_mtime
+    try:
+        ovr = override_files(default_fits_root(), run)
+    except Exception:                                  # noqa: BLE001 - a warning only
+        return []
+    return sorted(U for U, f in ovr.items() if f.stat().st_mtime > t)
 
 
 def point_voltages(db, run, data_root, exp: dict) -> dict:

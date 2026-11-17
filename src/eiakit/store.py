@@ -39,7 +39,9 @@ def _write_h5(path: Path, res: dict, attrs: dict | None) -> None:
         for name in ("corrected_tof", "corrected_tof_1m"):
             h.create_dataset(name, data=res[name])
         for group in ("corrected_spectra", "corrected_spectra_1m", "corrected_exp_points",
-                      "corrected_exp_tof"):
+                      "corrected_exp_tof", "corrected_exp_U"):
+            if group not in res:                   # corrected_exp_U: absent in old files
+                continue
             g = h.create_group(group)
             for key, arr in res[group].items():
                 g.create_dataset(_k(key), data=np.asarray(arr))
@@ -67,8 +69,9 @@ def load_calibration_h5(path: Path) -> dict:
         for name in ("corrected_tof", "corrected_tof_1m"):
             out[name] = h[name][()]
         for group in ("corrected_spectra", "corrected_spectra_1m", "corrected_exp_points",
-                      "corrected_exp_tof"):
-            out[group] = {_unk(n): h[group][n][()] for n in h[group]}
+                      "corrected_exp_tof", "corrected_exp_U"):
+            if group in h:
+                out[group] = {_unk(n): h[group][n][()] for n in h[group]}
         for group in ("integrals", "integrals_eia"):
             out[group] = {_unk(n): float(v) for n, v in h[group].attrs.items()}
         out.update({k: v for k, v in h.attrs.items()})

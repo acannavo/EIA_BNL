@@ -142,3 +142,26 @@ def test_calibration_with_an_empty_voltage(env):
     assert main(["run", "20251120", "--stage", "calibration", "--force"]) == 0
     h5 = env / "processed" / "20251120" / "20_calibration" / "spectra.h5"
     assert h5.is_file() and not h5.with_name("spectra.h5.part").exists()
+
+
+def test_cbs_points_carry_their_voltage_and_stale_warning(env):
+    import numpy as np
+
+    from eiakit.cbs_edit import CBSSession, point_voltages
+    from eiakit.cli import main
+    from eiakit.db import load_database
+    from eiakit.peaks_edit import PeakSession
+    main(["add-run", "20251120", "--target", "Nb", "--energy", "780", "--like", "20250611"])
+    assert main(["run", "20251120"]) == 0
+    db = load_database()
+    run = db.run("20251120")
+    s = CBSSession.load(db, run, env / "data", env / "processed")
+    assert all(np.isfinite(u).all() for u in s.exp_U.values()) and not s.peaks_newer
+    old = point_voltages(db, run, env / "data", s.exp)       # matching by TOF agrees
+    assert all(np.array_equal(old[z], s.exp_U[z]) for z in s.exp_U)
+    ps = PeakSession.load(db, run, env / "data", 35.0, processed=env / "processed")
+    ps.set_center(0, ps.fits.t0.iloc[0] * 1.001)
+    ps.save(env / "fits")                                     # after the calibration
+    s2 = CBSSession.load(db, run, env / "data", env / "processed")
+    assert s2.peaks_newer == [35.0]
+    assert all(np.isfinite(u).all() for u in s2.exp_U.values())   # still from the h5

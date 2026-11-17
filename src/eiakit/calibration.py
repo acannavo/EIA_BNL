@@ -162,6 +162,7 @@ def calibrate(rows: pd.DataFrame, fc_traces, fc_baseline_V: float, eia, fc, pipe
 
     exp_points = {k: corr(s["Yield_scaled"].values) / L_EIA ** 3 for k, s in segs.items()}
     exp_tof = {k: s["TOF"].values for k, s in segs.items()}
+    exp_U = {k: s["U"].to_numpy(float) for k, s in segs.items()}   # voltage of each point
     integrals = {k: _trapz(corr(y), tof_1m) for k, y in interp.items()}
     integrals_eia = {k: _trapz(corr(y) / L_EIA ** 3, tof_common) for k, y in interp.items()}
 
@@ -172,6 +173,7 @@ def calibrate(rows: pd.DataFrame, fc_traces, fc_baseline_V: float, eia, fc, pipe
         "corrected_tof_1m": tof_1m,
         "corrected_exp_points": exp_points,
         "corrected_exp_tof": exp_tof,
+        "corrected_exp_U": exp_U,
         "integrals": integrals,
         "total_integral": sum(integrals.values()),
         "integrals_eia": integrals_eia,

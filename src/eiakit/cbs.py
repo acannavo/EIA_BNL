@@ -55,10 +55,30 @@ def build_signals(ck: dict, mass_labels, per_ion: bool = True):
         if not t:
             continue
         t, y = np.concatenate(t), np.concatenate(y)
-        o = np.argsort(t)
+        o = np.argsort(t, kind="stable")
         yy = -y[o]
         exp[z] = (t[o] * 1e6, yy / z if per_ion else yy)
     return np.asarray(ck["corrected_tof"], float), curves, exp
+
+
+def exp_voltages(ck: dict, mass_labels) -> dict | None:
+    """Deflector voltage of every exp point, in the order of build_signals' exp {z: ...};
+    None for checkpoints written before the calibration recorded it."""
+    if "corrected_exp_U" not in ck:
+        return None
+    keep = None if mass_labels is None else {int(m) for m in mass_labels}
+    pts = {k: v for k, v in ck["corrected_exp_tof"].items()
+           if keep is None or int(k[0]) in keep}
+    out = {}
+    for z in sorted({z for (_, z) in pts}):
+        ks = [k for k in ck["corrected_exp_points"] if k in pts and k[1] == z]
+        if not ks:
+            continue
+        t = np.concatenate([pts[k] for k in ks])
+        u = np.concatenate([ck["corrected_exp_U"].get(k, np.full(len(pts[k]), np.nan))
+                            for k in ks])
+        out[z] = u[np.argsort(t, kind="stable")]
+    return out
 
 
 # ---- model -----------------------------------------------------------------------------

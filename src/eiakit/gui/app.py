@@ -578,6 +578,17 @@ class FitterTab(QWidget):
             QMessageBox.warning(self, "CBS fitter", msg)
             return
         self.src.setText(f"<small>{self.s.source}</small>")
+        if self.s.peaks_newer:
+            us = ", ".join(f"{u:g}" for u in self.s.peaks_newer)
+            self.win.log.appendPlainText(
+                f"{key}: WARNING the Peaks tab saved U = {us} V after the last calibration: "
+                "the measured points shown here are the old ones. Run the run (Runs tab), "
+                "then Load again.")
+            QMessageBox.warning(
+                self, "CBS fitter",
+                f"Peaks tab changes after the last calibration (U = {us} V).\n\nThe "
+                "measured points here are still the old fits. Run the run (Runs tab) and "
+                "Load again before fitting.")
         self.fill_z()
 
     def fill_z(self):
@@ -798,7 +809,9 @@ class FitterTab(QWidget):
                 Us = self.s.exp_U.get(z)
                 U = Us[j] if Us is not None and j < len(Us) else np.nan
                 self._hover.xy = (te[j], ye[j])
-                self._hover.set_text((f"U = {U:g} V" if np.isfinite(U) else "U = ?")
+                self._hover.set_text((f"U = {U:g} V" if np.isfinite(U) else
+                                      "U = ? (calibration older than the peak fits:\n"
+                                      "run the run, Load again)")
                                      + f"\nt = {te[j]:.4g} µs\nsignal {ye[j]:.3g}")
                 show = True
         if show or self._hover.get_visible():
