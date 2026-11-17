@@ -120,7 +120,8 @@ def study_status(db, study_name, part, data_root, processed, studies_root) -> di
             m = read_manifest(processed, run, stage)
             if m is None or m.get("run_id") != man.get("upstream", {}).get(key):
                 reasons.append(f"{stage.name} of {key} changed or missing")
-        expected = (st.all_runs() if part == "powerlaw" else st.runs if part == "collapse" else
+        expected = (st.all_runs() if part in ("powerlaw", "cbs") else
+                    st.runs if part == "collapse" else
                     [p.run for p in st.reconstruction.panels] if part == "reconstruction"
                     else st.runs)
         if set(man.get("upstream", {})) != set(expected):

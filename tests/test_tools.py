@@ -113,3 +113,21 @@ def test_extra_condition_column_and_pick_bars():
     assert list(lo) == [270.0, 310.0] and list(hi) == [340.0, 310.0]   # no pick: no bar
     f = cf.fit_summary(tab, {"Al": ["fast"]}, [180.0, 3.3], "picks", {3.3: "3.3 mJ (ps)"})
     assert f.panel(0, 1).title == "Al, 3.3 mJ (ps)"
+
+
+def test_study_cbs_status_counts_extra_runs(tmp_path, monkeypatch):
+    """cbs records every run incl. the extra ones: it must not stay 'stale' forever."""
+    import json
+
+    from eiakit import study as S
+    from eiakit.db import load_database
+    db = load_database()
+    st = db.study("PRL_AlNb")
+    d = tmp_path / "PRL_AlNb" / "cbs"
+    d.mkdir(parents=True)
+    monkeypatch.setattr(S, "read_manifest", lambda *a, **k: {"run_id": "x"})
+    man = {"source": "pipeline", "upstream_stage": "cbs",
+           "settings_hash": S._settings_hash(db, st),
+           "upstream": {k: "x" for k in st.all_runs()}}
+    (d / "manifest.json").write_text(json.dumps(man))
+    assert S.study_status(db, "PRL_AlNb", "cbs", None, None, tmp_path)["state"] == "ok"
