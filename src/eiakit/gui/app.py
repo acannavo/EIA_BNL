@@ -988,6 +988,22 @@ class PeaksTab(QWidget):
             "these lines, min S/N and peak freedom for every voltage not saved by itself "
             "(new runs: also for the peaks stage on the next run)"))
         left.addWidget(lb)
+        wb = QGroupBox("Waveforms in the average (r: correlation, S: signal V·µs)")
+        wl = QVBoxLayout(wb)
+        self.shots = QListWidget()
+        self.shots.setMaximumHeight(130)
+        self.shots.setToolTip(
+            "untick a shot to leave it out of the average (and of YieldAve / STDV); red ⚠: "
+            "suspect - correlation with the other shots < 0.7, or its signal > 20 % and "
+            "3 robust sigma away from the others (missed / weak pulse, glitch). Saved with "
+            "the voltage.")
+        self.shots.itemChanged.connect(self.shots_changed)
+        self.show_shots = QCheckBox("show every waveform")
+        self.show_shots.setToolTip("kept shots: thin grey; left out: dashed red")
+        self.show_shots.toggled.connect(lambda _: self.draw())
+        wl.addWidget(self.shots)
+        wl.addWidget(self.show_shots)
+        left.addWidget(wb)
         self.corr = QDoubleSpinBox()
         wf = float(win.db.pipeline["peaks"].get("window_frac", 0.02))
         self.corr.setRange(-wf + 0.001, 0.1)
@@ -1179,6 +1195,7 @@ class PeaksTab(QWidget):
         if self.s.bg:
             self.bg_reach.setValue(self.s.bg.get("reach", 0.03) * 100)
         self.fill_choice()
+        self.fill_shots()
         self._loading = False
         if saved:
             self.win.log.appendPlainText(f"U = {self.s.U:g} V: the saved fit (clicks "
@@ -1235,6 +1252,50 @@ class PeaksTab(QWidget):
             + f"), {int(f.weak.sum())} below S/N {self.s.min_snr:g}, peak freedom ± "
             f"{self.s.mu_bound * 1e9:.0f} ns")
         self.show_table()
+
+    def fill_shots(self):
+        """One checkable row per shot: used or not, correlation, signal, suspect."""
+        s = self.s
+        st = s.shot_stats()
+        self.shots.blockSignals(True)
+        self.shots.clear()
+        for r in st.itertuples():
+            c = f"{r.corr:.2f}" if np.isfinite(r.corr) else "–"
+            txt = f"{'⚠ ' if r.suspect else ''}{r.file or r.rep}  r {c}  S {r.signal_Vus:.2g}"
+            it = QListWidgetItem(txt)
+            it.setToolTip(f"shot {r.rep} ({r.file}): correlation with the other kept shots "
+                          f"{c}, signal {r.signal_Vus:.3g} V·µs, minimum {r.peak_V:.3g} V"
+                          + ("\nSUSPECT: correlation < 0.7 or signal far from the others"
+                             if r.suspect else ""))
+            it.setData(Qt.UserRole, int(r.rep))
+            it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
+            it.setCheckState(Qt.Checked if r.used else Qt.Unchecked)
+            if r.suspect:
+                it.setForeground(QColor("#c62828"))
+            self.shots.addItem(it)
+        self.shots.blockSignals(False)
+
+    def shots_changed(self, _item):
+        if self.s is None or self._loading:
+            return
+        drop = {self.shots.item(k).data(Qt.UserRole) for k in range(self.shots.count())
+                if self.shots.item(k).checkState() != Qt.Checked}
+        i = self.sel()
+        try:
+            self.s.set_dropped(drop)
+        except ValueError as e:
+            QMessageBox.information(self, "Peaks", str(e))
+            self.fill_shots()
+            return
+        self.win.log.appendPlainText(
+            f"U = {self.s.U:g} V: average of {len(self.s.kept())}/{len(self.s.traces)} "
+            "shots" + (" (left out: " + ", ".join(self.s.files.get(r, str(r))
+                                                  for r in sorted(drop)) + ")"
+                       if drop else ""))
+        self.fill_shots()
+        self.show_table()
+        if i is not None:
+            self.table.selectRow(i)
 
     def use_for_all(self):
         if self.s is None:
@@ -1356,7 +1417,18 @@ class PeaksTab(QWidget):
             return
         s, ax = self.s, self.ax
         ax.clear()
-        ax.plot(s.tof * 1e6, s.y, color="0.35", lw=0.8, label=f"average of {len(s.traces)} shots")
+        if self.show_shots.isChecked():
+            named = set()
+            for r in sorted(s.traces):
+                t, v = s.traces[r]
+                out = r in s.dropped
+                name = "left-out shot" if out else "single shot"
+                ax.plot(np.asarray(t) * 1e6, v, color="#c62828" if out else "0.7",
+                        ls="--" if out else "-", lw=0.6, alpha=0.9 if out else 0.6,
+                        label=None if name in named else name)
+                named.add(name)
+        ax.plot(s.tof * 1e6, s.y, color="0.35", lw=0.8,
+                label=f"average of {len(s.kept())}/{len(s.traces)} shots")
         sel = self.sel()
         seen = set()
         for i, r in enumerate(s.fits.itertuples()):

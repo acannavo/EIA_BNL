@@ -116,6 +116,29 @@ def test_window_tabs_and_cbs_fitter(tmp_path, monkeypatch):
     cb.setChecked(False)
     pk.snr.setValue(0)
     assert len(pk.s.lines) == n0
+    # waveforms: one row per shot; untick one -> average of the others; overlay
+    from PySide6.QtCore import Qt
+    assert pk.shots.count() == len(pk.s.traces) >= 2
+    y_all = pk.s.y.copy()
+    pk.shots.item(0).setCheckState(Qt.Unchecked)
+    assert pk.s.dropped == {sorted(pk.s.traces)[0]} and not np.allclose(pk.s.y, y_all)
+    pk.show_shots.setChecked(True)
+    assert "left-out shot" in [ln.get_label() for ln in pk.ax.get_lines()]
+    import eiakit.gui.app as gapp
+    told = []
+    real_info = gapp.QMessageBox.information
+    gapp.QMessageBox.information = lambda *a, **k: told.append(a[-1])
+    try:
+        for k in range(pk.shots.count()):                   # all unticked: refused
+            pk.shots.item(k).setCheckState(Qt.Unchecked)
+    finally:
+        gapp.QMessageBox.information = real_info
+    assert told and "at least one" in told[0]
+    assert len(pk.s.kept()) >= 1
+    for k in range(pk.shots.count()):
+        pk.shots.item(k).setCheckState(Qt.Checked)
+    assert not pk.s.dropped and np.allclose(pk.s.y, y_all)
+    pk.show_shots.setChecked(False)
     # common background: 2 points, a tuning point, remove it; negative Corr
     def click(t_us, v):
         X, Y = pk.ax.transData.transform((t_us, v))

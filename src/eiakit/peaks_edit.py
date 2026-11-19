@@ -11,6 +11,7 @@ Peak picker (replaces the per-voltage work of untitled28):
     s.set_selection({26: 13, 12: 4})      # which species / up to which z at this voltage
     s.min_snr, s.mu_bound                 # noise cut, how far a peak may move (refit after)
     s.save_defaults(fits_root)            # this choice for every voltage not saved itself
+    s.set_dropped({3}) / s.shot_stats()   # shots left out of the average / per-shot check
     s.set_common_bg((t1, v1), (t2, v2))   # one background for every line: horizontal at
     s.add_tune(t, v) / s.remove_tune(t)   # the mean of 2 clicks, + local tuning points
     s.save(fits_root)        # fits/<run>/peaks/p<U>.txt (Output columns) + _detail.txt
@@ -101,6 +102,8 @@ class PeakSession:
     min_snr: float = 0.0             # lines below min_snr x local noise: left out (0 = off)
     mu_bound: float = 150e-9         # how far a peak may move (s), never out of its window
     forced: set = field(default_factory=set)         # weak lines kept by hand (indices)
+    dropped: set = field(default_factory=set)        # shots (reps) left out of the average
+    files: dict = field(default_factory=dict)        # rep -> raw file name
 
     @classmethod
     def voltages(cls, run, data_root) -> list[float]:
@@ -140,6 +143,7 @@ class PeakSession:
             s = cls(db, run, U, tof, y, traces, new_run_lines(db, run),
                     det[det.U == U] if len(det) else det, run.eia.L_m, prof, settings, k=k,
                     k_auto=k, **_sel_fields(db, run))
+            s.files = {r: p.name for r, p in files.items()}
             s.refit()
             return s
         rows = read_output_folder(sem / "Output")
@@ -157,6 +161,7 @@ class PeakSession:
         L = run.legacy.peaks_lof_m if run.legacy and run.legacy.peaks_lof_m else run.eia.L_m
         s = cls(db, run, U, tof, y, traces, lines, leg, L, prof, settings,
                 **_sel_fields(db, run))
+        s.files = {r: p.name for r, p in files.items()}
         s.refit()
         return s
 
@@ -172,6 +177,10 @@ class PeakSession:
             return False
         m = json.loads(p.read_text(encoding="utf-8"))
         self._apply_choice(m)
+        dr = {r for r in m.get("dropped_shots", []) if r in self.traces}
+        if dr != self.dropped and len(dr) < len(self.traces):
+            self.dropped = dr
+            self._average()
         self.u_clicks = int(m.get("u_clicks", 0))
         self.lof_clicks = int(m.get("lof_clicks", 0))
         self.corr = float(m.get("corr", 0.0))
@@ -489,7 +498,7 @@ class PeakSession:
         if corr is not None:
             self.corr = corr
         out = []
-        reps = sorted(self.traces)
+        reps = self.kept()
         Bt = self.bg_curve() if self.bg_on else None
         for i, (_m_amu, label, z) in enumerate(self.lines):
             t0 = self.t0(i)
@@ -524,6 +533,56 @@ class PeakSession:
             out.append(row)
         self.fits = pd.DataFrame(out)
         return self.fits
+
+    # ---------------------------------------------------------------- shots
+    def kept(self) -> list:
+        """Shots (reps) in the average."""
+        return [r for r in sorted(self.traces) if r not in self.dropped]
+
+    def set_dropped(self, reps):
+        """Leave these shots out of the average (and of YieldAve / STDV / per-shot
+        yields); at least one shot stays. Refit."""
+        reps = {r for r in reps if r in self.traces}
+        if len(reps) >= len(self.traces):
+            raise ValueError("keep at least one waveform")
+        self.dropped = reps
+        self._average()
+        self.refit()
+
+    def _average(self):
+        n = max(len(t) for t, _ in self.traces.values())   # same grid length as all shots
+        self.tof, self.y = average_repeats([self.traces[r] for r in self.kept()], n)
+
+    def shot_stats(self) -> pd.DataFrame:
+        """Per shot, on the grid of the average: peak (most negative value), signal
+        (area below the shot's median, V us), correlation with the mean of the OTHER kept
+        shots, and 'suspect' (correlation < 0.7, or signal more than 3 robust sigma and 20 %
+        from the median of the shots - a missed or weak laser pulse, a glitch)."""
+        reps = sorted(self.traces)
+        g = self.tof
+        Y = np.vstack([np.interp(g, *self.traces[r]) for r in reps])
+        dt = np.gradient(g)
+        sig = ((np.median(Y, axis=1, keepdims=True) - Y).clip(0) * dt).sum(1) * 1e6
+        kept = [r for r in reps if r not in self.dropped]
+        corr = []
+        for k, r in enumerate(reps):
+            others = [Y[j] for j, q in enumerate(reps) if q != r and q in kept]
+            if not others or np.std(Y[k]) == 0:
+                corr.append(np.nan)
+                continue
+            ref = np.mean(others, axis=0)
+            corr.append(float(np.corrcoef(Y[k], ref)[0, 1]) if np.std(ref) > 0 else np.nan)
+        corr = np.array(corr)
+        med = np.median(sig)
+        mad = 1.4826 * np.median(np.abs(sig - med))
+        # far from the others: > 3 robust sigma AND > 20 % of the median signal (with
+        # few, near-identical shots the robust sigma alone is tiny)
+        far = (np.abs(sig - med) > max(3 * mad, 0.2 * abs(med))) if len(reps) >= 3 \
+            else np.zeros(len(reps), bool)
+        sus = far | (np.nan_to_num(corr, nan=1.0) < 0.7)
+        return pd.DataFrame({"rep": reps, "file": [self.files.get(r, "") for r in reps],
+                             "peak_V": Y.min(1), "signal_Vus": sig, "corr": corr,
+                             "suspect": sus, "used": [r not in self.dropped for r in reps]})
 
     def set_center(self, i, t_s: float | None):
         if t_s is None:
@@ -592,7 +651,9 @@ class PeakSession:
                 "min_snr": self.min_snr, "mu_bound_s": self.mu_bound,
                 "forced": [list(self.lines[i][1:]) for i in sorted(self.forced)],
                 "common_bg": self.bg,
-                "files": len(self.traces)}
+                "files": len(self.traces),
+                "dropped_shots": sorted(self.dropped),
+                "dropped_files": [self.files.get(r, str(r)) for r in sorted(self.dropped)]}
         (d / f"p{_ustr(self.U)}.json").write_text(json.dumps(meta, indent=1, default=str),
                                                   encoding="utf-8")
         return p
