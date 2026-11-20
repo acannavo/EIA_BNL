@@ -11,6 +11,7 @@ import json
 import time
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from . import __version__
@@ -170,6 +171,23 @@ def cbs(db, study_name, data_root, processed, studies_root, source="pipeline",
             labels[float(mj)] = f"{mj:g} mJ ({r.laser.pulse})"
     figs["fit_summary"] = cf.fit_summary(tab, st.avg_components, cols, "picks", labels)
     figs["fit_summary_fwhm"] = cf.fit_summary(tab, st.avg_components, cols, "fit", labels)
+    # slow-component energy vs z: Poirier A (z+1)^B, linear, quadratic
+    from .slow_energy import fit_table, literature_points, slow_points
+    spts = slow_points(tab, db)
+    lit = literature_points(db.literature, st.collapse.literature if st.collapse else [])
+    sfit = fit_table(spts, lit)
+    spts.to_csv(out / "slow_energy_points.csv", index=False)
+    sfit.to_csv(out / "slow_energy_fits.csv", index=False)
+    figs["slow_energy"] = cf.slow_energy(spts, cols, labels, tuple(st.rows))
+    if lit:
+        figs["slow_energy_literature"] = cf.slow_energy_literature(lit)
+    for r in sfit[sfit.status == "ok"].itertuples():
+        par = (f"A = {r.A:.4g} +/- {r.A_err:.2g}, B = {r.B:.3f} +/- {r.B_err:.3f}"
+               if r.model == "poirier" else
+               ", ".join(f"{n} = {getattr(r, n):.4g}" for n in ("a", "b", "c")
+                         if np.isfinite(getattr(r, n))))
+        log(f"  E_slow {r.dataset:<22} {r.model:<9} {par}  R2 = {r.R2:.4f}  "
+            f"AIC = {r.AIC:.1f}{'  <- best' if r.best_by_AIC else ''}")
     for name, f in figs.items():
         if formats:
             save(f, out / name, formats=formats)
@@ -186,6 +204,18 @@ def cbs(db, study_name, data_root, processed, studies_root, source="pipeline",
                     "half-maximum points picked in the fitter (picked FWHM); second figure: "
                     "the FWHM of the fitted function. u = L/t, so the bars are asymmetric."),
               figs["fit_summary"], figs["fit_summary_fwhm"]]
+    shown = sfit[sfit.status == "ok"].drop(columns=["status", "species"]).round(4)
+    items += [("h2", "Slow component energy vs charge state"),
+              ("p", "E = m u²/2 at the peak of each fitted slow CBS component (bars: the "
+                    "picked half-maximum points), fitted with E = A (z+1)^B (Poirier et "
+                    "al. 2023), E = a + b z and E = a + b z + c z² (unweighted least "
+                    "squares). 'best' / best_by_AIC: the lowest AIC = n ln(SS/n) + 2k, which "
+                    "penalises the extra parameter of the quadratic law. The literature "
+                    "panel applies the same fits to the published points as a check."),
+              figs["slow_energy"]]
+    if "slow_energy_literature" in figs:
+        items.append(figs["slow_energy_literature"])
+    items.append(("table", shown, "fits of E_slow(z) (slow_energy_fits.csv)"))
     meta = (f"eiakit {__version__}, git {git_commit()}, {time.strftime('%Y-%m-%d %H:%M')}"
             f"; runs: {', '.join(st.all_runs())}")
     write_html_page(out / "cbs.html", f"{study_name}: CBS components", items, meta)

@@ -120,11 +120,31 @@ LEGACY_ZBAR = {   # run: (C, b, sig_b, n, R2, E_lo, E_hi, npts)
 }
 
 
+# the study as the legacy scripts ran it: the six 2025 runs and the original
+# ExclusionList.txt - frozen here so that editing db/studies/PRL_AlNb.toml (new runs,
+# new exclusions) does not break the comparison with the scripts' printed numbers
+LEGACY_EXCLUDE = {
+    "20250513": {"all": [12, 13]}, "20250602": {"all": [12, 13]},
+    "20250606": {"all": [12, 13]}, "20250611": {"all": list(range(18, 24))},
+    "20250617": {"all": list(range(18, 24))}, "20250623": {"all": list(range(18, 24))},
+}
+
+
+def legacy_study():
+    st = db.study("PRL_AlNb")
+    frozen = st.model_copy(update={
+        "exclude": LEGACY_EXCLUDE, "column_energy_mJ": [180.0, 370.0, 780.0],
+        "runs": ["20250513", "20250602", "20250606", "20250611", "20250623", "20250617"],
+        "extra_runs": [], "include_extra": False})
+    db.studies["PRL_AlNb"] = frozen          # study_components looks the study up by name
+    return frozen
+
+
 @pytest.mark.parametrize("key", [k for k in LEGACY_ZBAR if (ROOT / k / "EIA-Results").is_dir()])
 def test_zbar_power_law_matches_legacy_script(key):
     from eiakit.analysis import analyze_zbar, load_dataset
     from eiakit.legacy import load_checkpoint
-    st = db.study("PRL_AlNb")
+    st = legacy_study()
     ck = load_checkpoint(ROOT / key / "EIA-Results" / "pipeline_checkpoint.npy")
     f = analyze_zbar(load_dataset(db, db.run(key), ck, st), st.zbar)["fit"]
     new = (f"{f['C']:.4g}", f"{f['b']:.4f}", f"{f['sig_b']:.4f}", f"{f['n']:.3f}",
@@ -153,7 +173,7 @@ LEGACY_CBS_MEANS = {
 
 def test_cbs_component_means_match_legacy_script():
     from eiakit.cbs_study import component_means, study_components
-    st = db.study("PRL_AlNb")
+    st = legacy_study()
     if not all((ROOT / k / "EIA-Results").is_dir() for k in st.runs):
         pytest.skip("not all PRL runs present")
     tab = study_components(db, "PRL_AlNb", ROOT)
@@ -178,7 +198,7 @@ def test_collapse_matches_legacy_script():
     from eiakit import collapse as C
     from eiakit.analysis import load_dataset
     from eiakit.legacy import load_checkpoint
-    st = db.study("PRL_AlNb")
+    st = legacy_study()
     if not all((ROOT / k / "EIA-Results").is_dir() for k in st.runs):
         pytest.skip("not all PRL runs present")
     cs = st.collapse

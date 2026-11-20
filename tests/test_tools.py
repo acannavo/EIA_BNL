@@ -183,3 +183,25 @@ def test_peak_check_time_axis_follows_the_data():
     assert lo < 1.5 and hi < 10
     lo2, hi2 = f.panel(0, 0).xlim
     assert 10 < lo2 < 60 < hi2
+
+
+def test_slow_energy_laws():
+    import numpy as np
+
+    from eiakit.slow_energy import fit_models, fit_table, literature_points
+    z = np.arange(1, 12, dtype=float)
+    E = 40.0 * (z + 1) ** 2.4 * (1 + 0.01 * np.sin(z))          # Poirier-like, 1 % noise
+    f = {r["model"]: r for r in fit_models(z, E)}
+    A, B = f["poirier"]["params"]
+    assert abs(B - 2.4) < 0.03 and abs(A / 40 - 1) < 0.1 and f["poirier"]["R2"] > 0.999
+    assert f["poirier"]["AIC"] < f["linear"]["AIC"]
+    E2 = 100 + 500 * z
+    g = {r["model"]: r for r in fit_models(z, E2 + np.cos(z))}
+    assert abs(g["linear"]["params"][1] - 500) < 1 and g["linear"]["R2"] > 0.9999
+    assert fit_models([1, 2], [1, 2])[2]["status"].startswith("needs")   # quadratic: 3 pars
+    from eiakit.db import load_database
+    lit = literature_points(load_database().literature, ["poirier_2023_sn"])
+    t = fit_table(__import__("pandas").DataFrame(columns=["species", "energy_mJ", "z", "E_eV"]),
+                  lit)
+    best = t[t.best_by_AIC].model.tolist()
+    assert best == ["poirier"]                              # Poirier's own law wins on Sn
