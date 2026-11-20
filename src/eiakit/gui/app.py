@@ -290,6 +290,10 @@ class StudiesTab(QWidget):
         self.html_only = QCheckBox("HTML only (faster)")
         gl.addWidget(self.html_only)
         gl.addWidget(_btn("Make figures", self.make))
+        gl.addWidget(_btn("Export CSV", self.export_csv,
+                          "the charge-state time distributions of every run of the study "
+                          "(and the measured points) as CSV in studies/<study>/export; "
+                          "flight length and 'yield x z' are stated in each file"))
         gl.addWidget(_btn("Method studies (Step 12)", self.methods,
                           "eiakit methods: z̄ systematics, calibration, sensitivity, FC, shots"))
         gl.addStretch()
@@ -356,6 +360,9 @@ class StudiesTab(QWidget):
         parts = [p for p, cb in self.parts.items() if cb.isChecked()]
         self.win.runner.run("study", self.name(), "--part", *parts,
                             *(["--html-only"] if self.html_only.isChecked() else []))
+
+    def export_csv(self):
+        self.win.runner.run("export", self.name())
 
     def methods(self):
         self.win.runner.run("methods", self.name(),

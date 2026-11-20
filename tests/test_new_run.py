@@ -165,3 +165,18 @@ def test_cbs_points_carry_their_voltage_and_stale_warning(env):
     s2 = CBSSession.load(db, run, env / "data", env / "processed")
     assert s2.peaks_newer == [35.0]
     assert all(np.isfinite(u).all() for u in s2.exp_U.values())   # still from the h5
+    # CSV export of the study's distributions: flight length and 'yield x z' stated
+    import pandas as pd
+
+    from eiakit.export import export_run
+    from eiakit.store import load_calibration_h5
+    ck = load_calibration_h5(env / "processed" / "20251120" / "20_calibration" / "spectra.h5")
+    f1, f2 = export_run(db, run, ck, env / "export")
+    txt = f1.read_text(encoding="utf-8")
+    assert "L_EIA = " in txt and "yield x z" in txt and "scaled to a 1 m flight path" in txt
+    pts = pd.read_csv(f2, comment="#")
+    assert len(pts) and pts.U_V.notna().all() and (pts["per_ion_1m (yield)"] > 0).all()
+    k = (92, 5)
+    sel = pts[(pts.m_label == 92) & (pts.z == 5)]
+    assert np.allclose(sel["signal_1m (yield x z)"] / 5, sel["per_ion_1m (yield)"])
+    assert np.allclose(sorted(sel.t_us_at_L_EIA), np.sort(ck["corrected_exp_tof"][k]) * 1e6)

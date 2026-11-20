@@ -502,6 +502,19 @@ def cmd_run(args) -> int:
     return worst
 
 
+def cmd_export(args) -> int:
+    from .export import export_study
+
+    db = _load_db()
+    paths = get_paths()
+    if args.name not in db.studies:
+        print(f"ERROR: no study {args.name!r}; known: {', '.join(sorted(db.studies))}")
+        return 2
+    print(f"{args.name} / export CSV (charge-state time distributions)")
+    files = export_study(db, args.name, paths.processed, paths.studies, args.points)
+    return 0 if files else 1
+
+
 def cmd_study(args) -> int:
     from . import study as S
 
@@ -846,6 +859,12 @@ def main(argv=None) -> int:
     p.add_argument("--html-only", action="store_true", help="skip PDF / PNG")
     p.add_argument("--status", action="store_true", help="only say whether it is up to date")
     p.set_defaults(func=cmd_study)
+    p = sub.add_parser("export", help="CSV of the charge-state time distributions of a "
+                                      "study's runs (studies/<study>/export)")
+    p.add_argument("name", help="study name")
+    p.add_argument("--points", type=int, default=2000,
+                   help="time points of the resampled curves (default 2000)")
+    p.set_defaults(func=cmd_export)
     p = sub.add_parser("snapshot", help="save the paper numbers of a study")
     p.add_argument("name")
     p.add_argument("--label", required=True)
