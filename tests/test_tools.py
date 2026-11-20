@@ -205,3 +205,39 @@ def test_slow_energy_laws():
                   lit)
     best = t[t.best_by_AIC].model.tolist()
     assert best == ["poirier"]                              # Poirier's own law wins on Sn
+
+
+def test_cbs_peak_definitions():
+    """Peaks of dN/dt, dN/dv, dN/dE of one CBS component: the analytic formula equals the
+    numerical maximum of the curve converted point by point with the Jacobian."""
+    import numpy as np
+
+    from eiakit.physics import (
+        cbs_density_peak_velocity,
+        cbs_mean_velocity,
+        cbs_shape,
+        shift_velocity,
+    )
+    m, e, L, z, kT, V0 = 27 * 1.66054e-27, 1.602177e-19, 1.0, 3, 80.0, 150.0
+    t = np.linspace(2e-6, 60e-6, 400001)
+    F = cbs_shape(t, kT, V0, z, m, L, e)                    # dN/dt
+    v, E = L / t, 0.5 * m * (L / t) ** 2 / e
+    for dens, y in (("t", F), ("v", F * t ** 2 / L), ("E", F * t / (2 * E))):
+        u_num = v[np.argmax(y)]
+        u_ana = cbs_density_peak_velocity(kT, V0, z, m, e, dens)
+        assert abs(u_num / u_ana - 1) < 1e-4, dens
+    ut, uv, uE = (cbs_density_peak_velocity(kT, V0, z, m, e, d) for d in "tvE")
+    assert ut > uv > uE > shift_velocity(kT, V0, z, m, e)
+    dndv = F * t ** 2 / L                                   # mean of v over dN/dv
+    vm = np.trapezoid(v * dndv, v) / np.trapezoid(dndv, v)
+    assert abs(cbs_mean_velocity(kT, V0, z, m, e) / vm - 1) < 1e-3
+
+
+def test_power_law_and_energy_laws():
+    import numpy as np
+
+    from eiakit.slow_energy import LAWS_ENERGY, fit_models
+    z = np.arange(1, 10, dtype=float)
+    f = {r["model"]: r for r in fit_models(z, 30 * z ** 1.7, LAWS_ENERGY)}
+    assert set(f) == {"poirier", "linear", "power"}
+    assert abs(f["power"]["params"][1] - 1.7) < 1e-6 and f["power"]["R2"] > 0.999999
