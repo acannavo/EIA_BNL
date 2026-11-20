@@ -24,8 +24,12 @@ MODELS = {
     "poirier": ("A (z+1)^B", lambda z, A, B: A * (z + 1.0) ** B, 2),
     "linear": ("a + b z", lambda z, a, b: a + b * z, 2),
     "quadratic": ("a + b z + c z²", lambda z, a, b, c: a + b * z + c * z * z, 3),
+    "power": ("A z^B", lambda z, A, B: A * z ** B, 2),
 }
-PARAM_NAMES = {"poirier": ("A", "B"), "linear": ("a", "b"), "quadratic": ("a", "b", "c")}
+PARAM_NAMES = {"poirier": ("A", "B"), "linear": ("a", "b"), "quadratic": ("a", "b", "c"),
+               "power": ("A", "B")}
+LAWS_TIME = ("poirier", "linear", "quadratic")        # E from the selected peak definition
+LAWS_ENERGY = ("poirier", "linear", "power")          # E at the dN/dE peak (Poirier-like)
 
 
 def energy_eV(u_kms, m_amu: float, amu_kg: float, e_C: float):
@@ -33,24 +37,26 @@ def energy_eV(u_kms, m_amu: float, amu_kg: float, e_C: float):
     return 0.5 * m_amu * amu_kg * (np.asarray(u_kms, float) * 1e3) ** 2 / e_C
 
 
-def fit_models(z, E) -> list[dict]:
-    """The three laws on (z, E); a law is skipped when it has as many parameters as
-    points (no degree of freedom)."""
+def fit_models(z, E, models=LAWS_TIME) -> list[dict]:
+    """The laws on (z, E); a law is skipped when it has as many parameters as points (no
+    degree of freedom)."""
     z, E = np.asarray(z, float), np.asarray(E, float)
     ok = np.isfinite(z) & np.isfinite(E)
     z, E = z[ok], E[ok]
     out = []
-    for name, (formula, f, k) in MODELS.items():
+    for name in models:
+        formula, f, k = MODELS[name]
         r = {"model": name, "formula": formula, "n": len(z), "k": k}
         if len(z) <= k:
             out.append({**r, "status": f"needs > {k} points"})
             continue
-        if name == "poirier":
-            pos = E > 0
+        if name in ("poirier", "power"):
+            pos = (E > 0) & (z > 0)
             if pos.sum() < 2:
                 out.append({**r, "status": "needs E > 0"})
                 continue
-            B0, lnA0 = np.polyfit(np.log(z[pos] + 1), np.log(E[pos]), 1)
+            zz = z[pos] + (1.0 if name == "poirier" else 0.0)
+            B0, lnA0 = np.polyfit(np.log(zz), np.log(E[pos]), 1)
             p0 = (float(np.exp(lnA0)), float(B0))
         else:
             p0 = np.polyfit(z, E, k - 1)[::-1]
@@ -78,15 +84,16 @@ def curve(model: str, params, z):
     return MODELS[model][1](np.asarray(z, float), *params)
 
 
-def slow_points(tab: pd.DataFrame, db) -> pd.DataFrame:
-    """E(z) of the slow components of the study table (not excluded), per run."""
+def slow_points(tab: pd.DataFrame, db, col: str = "u_fit") -> pd.DataFrame:
+    """E(z) of the slow components of the study table (not excluded), per run; E from the
+    velocity column col (u_fit = u_dNdt: dN/dt peak; u_dNdE: dN/dE peak, ...)."""
     t = tab[(tab.component == "slow") & ~tab.excluded].copy()
     if t.empty:
         return pd.DataFrame(columns=["run", "species", "energy_mJ", "z", "E_eV",
                                      "E_lo_eV", "E_hi_eV"])
     prof = db.profile(None)
     m = t.species.map(lambda s: db.species[s].mass_amu)
-    E = energy_eV(t.u_fit, 1.0, prof.amu_kg, prof.e_C) * m
+    E = energy_eV(t[col], 1.0, prof.amu_kg, prof.e_C) * m
     # picked half-maximum points: earlier time = faster = higher E
     lo = energy_eV(t.u_right, 1.0, prof.amu_kg, prof.e_C) * m
     hi = energy_eV(t.u_left, 1.0, prof.amu_kg, prof.e_C) * m
@@ -111,18 +118,19 @@ def literature_points(lit: dict, names) -> dict:
     return out
 
 
-def fit_table(pts: pd.DataFrame, lit: dict) -> pd.DataFrame:
+def fit_table(pts: pd.DataFrame, lit: dict, models=LAWS_TIME, peak: str = "") -> pd.DataFrame:
     """One row per (dataset, law): parameters +/- errors, R^2, rms_rel, AIC, best."""
     rows = []
     sets = [(f"{sp}, {mj:g} mJ", g.z.to_numpy(), g.E_eV.to_numpy(), sp, mj)
             for (sp, mj), g in pts.groupby(["species", "energy_mJ"], sort=False)]
     sets += [(lab, z, E, "literature", np.nan) for lab, (z, E) in lit.items()]
     for name, z, E, sp, mj in sets:
-        fits = fit_models(z, E)
+        fits = fit_models(z, E, models)
         good = [f for f in fits if f.get("status") == "ok" and np.isfinite(f["AIC"])]
         best = min(good, key=lambda f: f["AIC"])["model"] if good else None
         for f in fits:
-            r = {"dataset": name, "species": sp, "energy_mJ": mj, "model": f["model"],
+            r = {"dataset": name, "peak": peak, "species": sp, "energy_mJ": mj,
+                 "model": f["model"],
                  "formula": f["formula"], "n": f["n"], "status": f.get("status")}
             for j, pn in enumerate(PARAM_NAMES[f["model"]]):
                 r[pn] = f["params"][j] if "params" in f else np.nan

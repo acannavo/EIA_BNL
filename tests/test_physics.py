@@ -198,3 +198,23 @@ def test_mass_fix_changes_kT_V0_not_times(db):
     y_old = ph.cbs_shape(t, kT, V0, z, m_old, L, e)
     y_new = ph.cbs_shape(t, kT * s, V0 * s, z, m_new, L, e)
     assert np.allclose(y_new / y_new.max(), y_old / y_old.max(), rtol=1e-9, atol=1e-12)
+
+
+def test_cbs_density_peaks_match_numerical_maxima():
+    """dN/dt, dN/dv, dN/dE of one CBS component: the closed-form peak velocities equal
+    the numerical maxima of the curves (dN/dt = cbs_shape; dN/dv = dN/dt t^2/L;
+    dN/dE = dN/dt t/2E), and the mean velocity is axis-independent."""
+    import numpy as np
+
+    from eiakit.physics import cbs_density_peak_velocity, cbs_mean_velocity, cbs_shape
+    amu, e = 1.66053906660e-27, 1.602176634e-19
+    m, L, z, kT, V0 = 27 * amu, 3.0, 3, 150.0, 400.0
+    t = np.linspace(2e-6, 200e-6, 400001)
+    F = cbs_shape(t, kT, V0, z, m, L, e)
+    E = 0.5 * m * (L / t) ** 2 / e
+    for d, dens in (("t", F), ("v", F * t ** 2 / L), ("E", F * t / (2 * E))):
+        u_num = L / t[np.argmax(dens)]
+        assert abs(u_num / cbs_density_peak_velocity(kT, V0, z, m, e, d) - 1) < 2e-4
+    v = L / t
+    w = F * np.abs(np.gradient(t))                     # dN = dN/dt dt, on the time grid
+    assert abs((v * w).sum() / w.sum() / cbs_mean_velocity(kT, V0, z, m, e) - 1) < 2e-3

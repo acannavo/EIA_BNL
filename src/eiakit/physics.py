@@ -191,6 +191,46 @@ def cbs_peak_velocity(kT_eV, V0, z, m_kg: float, e_C: float, gamma: float = GAMM
     return 0.5 * (v_s + np.sqrt(v_s ** 2 + 20.0 * kT_J / m_kg))
 
 
+#: power k of v in each density of a CBS component, n(v) = v^k exp(-m (v - v_s)^2 / 2kT):
+#: dN/dt = n v^2 |dv/dt| with |dv/dt| = v^2/L -> v^5 (the time-of-flight shape, cbs_shape);
+#: dN/dv = dN/dt |dt/dv| = dN/dt L/v^2 -> v^3; dN/dE = dN/dv |dv/dE| = dN/dv / (m v) -> v^2
+CBS_DENSITY_POWER = {"t": 5, "v": 3, "E": 2}
+
+
+def cbs_density_peak_velocity(kT_eV, V0, z, m_kg: float, e_C: float, density: str = "t",
+                              gamma: float = GAMMA_DEFAULT):
+    """
+    Velocity at the maximum of a CBS component plotted as dN/d<density> (t, v or E).
+    With n(v) = v^k exp(-m (v - v_s)^2 / 2kT), d ln n / dv = k/v - m (v - v_s)/kT = 0:
+        m u^2 - m v_s u - k kT = 0  ->  u = (v_s + sqrt(v_s^2 + 4 k kT / m)) / 2
+    k = 5 (per unit time, the measured shape), 3 (per unit velocity), 2 (per unit energy).
+    """
+    k = CBS_DENSITY_POWER[density]
+    v_s = shift_velocity(kT_eV, V0, z, m_kg, e_C, gamma)
+    kT_J = np.asarray(kT_eV, dtype=float) * e_C
+    return 0.5 * (v_s + np.sqrt(v_s ** 2 + 4.0 * k * kT_J / m_kg))
+
+
+def cbs_mean_velocity(kT_eV, V0, z, m_kg: float, e_C: float, gamma: float = GAMMA_DEFAULT,
+                      n: int = 2001):
+    """
+    Mean velocity of the ions of a CBS component, <v> = int v dN/dv dv / int dN/dv dv
+    with dN/dv ~ v^3 exp(-m (v - v_s)^2 / 2kT), v > 0 (numerical, n points over
+    v_s +/- 10 thermal widths). The same number whatever axis the spectrum is drawn on.
+    """
+    kT = np.atleast_1d(np.asarray(kT_eV, dtype=float))
+    v_s = np.atleast_1d(shift_velocity(kT_eV, V0, z, m_kg, e_C, gamma)) * np.ones_like(kT)
+    sig = np.sqrt(kT * e_C / m_kg)
+    out = np.full(kT.shape, np.nan)
+    for i, (vs, sg) in enumerate(zip(v_s, sig, strict=True)):
+        if not (np.isfinite(vs) and np.isfinite(sg) and sg > 0):
+            continue
+        v = np.linspace(max(vs - 10 * sg, 0.0), vs + 10 * sg, n)
+        w = v ** 3 * np.exp(-0.5 * ((v - vs) / sg) ** 2)
+        out[i] = float((v * w).sum() / w.sum()) if w.sum() > 0 else np.nan
+    return out if np.ndim(kT_eV) else float(out[0])
+
+
 def cbs_peak_tof(kT_eV, V0, z, m_kg: float, L_m: float, e_C: float,
                  gamma: float = GAMMA_DEFAULT):
     return L_m / cbs_peak_velocity(kT_eV, V0, z, m_kg, e_C, gamma)

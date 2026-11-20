@@ -252,9 +252,18 @@ class ReconstructionSettings(_Model):
     panels: list[ReconstructionPanel] = []
 
 
+#: velocity of a fitted CBS component used by the study (cbs_study columns):
+#: dN/dt = peak of the measured time-of-flight shape (u = L / t_peak, the legacy choice),
+#: dN/dv / dN/dE = peak of the same ions counted per unit velocity / energy,
+#: mean = mean velocity (independent of the axis)
+PEAK_DEFINITIONS = {"dN/dt": "u_dNdt", "dN/dv": "u_dNdv", "dN/dE": "u_dNdE",
+                    "mean": "u_mean"}
+
+
 class Study(_Model):
     name: str
     description: str = ""
+    peak_definition: Literal["dN/dt", "dN/dv", "dN/dE", "mean"] = "dN/dt"
     runs: list[str]
     extra_runs: list[str] = []
     include_extra: bool = False

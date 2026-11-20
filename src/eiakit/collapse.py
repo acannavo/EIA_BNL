@@ -75,13 +75,20 @@ def eia_peaks(ds, prom_frac: float = 0.05, err_mode: str = "hwhm") -> pd.DataFra
     return pd.DataFrame(rows, columns=COLS)
 
 
-def cbs_peaks(db, run, data_root, t_source: str = "exp") -> pd.DataFrame:
-    """Fitted components of the run's CBS file: PEAK sample ('exp') or picked t_peak."""
+def cbs_peaks(db, run, data_root, t_source: str = "exp",
+              peak_definition: str = "dN/dt") -> pd.DataFrame:
+    """Fitted components of the run's CBS file: PEAK sample ('exp') or picked t_peak
+    ('fit'); with 'fit' and a peak_definition other than dN/dt the time is L/u of that
+    definition (dN/dv, dN/dE peak or mean velocity, from the component's kT and V0)."""
     from .cbs_store import default_fits_root, load_fit
+    from .physics import cbs_density_peak_velocity, cbs_mean_velocity
 
     fit = load_fit(db, run, data_root, default_fits_root())
     L = fit.header.L_EIA_m or run.eia.L_m
     names = run.cbs_names
+    prof = db.profile_for(run, "cbs")
+    m_kg, e_C = db.mass_kg(run.target, prof), db.e_C(prof)
+    gamma = float(db.pipeline["cbs"].get("gamma", 5 / 3))
     rows = []
     for c in fit.components:
         comp = names.get(c.cbs)
@@ -92,6 +99,12 @@ def cbs_peaks(db, run, data_root, t_source: str = "exp") -> pd.DataFrame:
             c.picks.get("t_peak", np.nan)
         if not np.isfinite(t_pk):                  # CBS-fitter fit: no raw peak samples
             t_pk = (c.picks or {}).get("t_peak", np.nan)
+        if t_source == "fit" and peak_definition != "dN/dt" and np.isfinite(c.V0):
+            u = (cbs_mean_velocity(c.kT, c.V0, c.z, m_kg, e_C, gamma)
+                 if peak_definition == "mean" else
+                 cbs_density_peak_velocity(c.kT, c.V0, c.z, m_kg, e_C,
+                                           peak_definition[-1], gamma))
+            t_pk = L / float(u) * 1e6 if u and np.isfinite(u) else np.nan
         if not np.isfinite(t_pk):
             continue
         rows.append(dict(run=run.key, element=run.target, energy_mJ=run.laser.energy_mJ,

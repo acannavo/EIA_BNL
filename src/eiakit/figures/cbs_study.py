@@ -127,7 +127,8 @@ def _pick_bounds(r):
 
 
 def fit_summary(tab, avg_components: dict, energies=(180, 370, 780),
-                bars: str = "picks", labels: dict | None = None) -> Figure:
+                bars: str = "picks", labels: dict | None = None, col: str = "u_fit",
+                ylabel: str = "Fit peak") -> Figure:
     """All conditions: fitted peak velocity per z (peak of the fitted CBS function).
     bars 'picks': the picked half-maximum points (FWHM picked in the fitter);
     'fit': the FWHM of the fitted function (t -/+ FWHM/2). Both asymmetric in u.
@@ -141,7 +142,7 @@ def fit_summary(tab, avg_components: dict, energies=(180, 370, 780),
             p = fig.panel(i, j)
             p.title = f"{el}, " + ((labels or {}).get(mj) or f"{mj:g} mJ")
             p.xlabel = Z_LABEL
-            p.ylabel = lab(r"Fit peak  $u$  (km/s)", "Fit peak u (km/s)") if j == 0 else None
+            p.ylabel = lab(ylabel + r"  $u$  (km/s)", ylabel + " u (km/s)") if j == 0 else None
             g = t[(t.species == el) & np.isclose(t.energy_mJ.astype(float), mj)]
             if g.empty:
                 p.empty_text = "no data"
@@ -150,27 +151,30 @@ def fit_summary(tab, avg_components: dict, energies=(180, 370, 780),
                 r = g[g.component == c].sort_values("z")
                 if r.empty:
                     continue
-                u = r.u_fit.to_numpy(float)
+                u = r[col].to_numpy(float)
                 lo, hi = _pick_bounds(r) if bars == "picks" else _fwhm_bounds(r)
+                if col != "u_fit":                  # bars measured around the dN/dt peak:
+                    lo, hi = lo - r.u_fit.to_numpy(float) + u, hi - r.u_fit.to_numpy(float) + u
                 p.add(ErrorBars(r.z.to_numpy(float), u, COMPONENT_NAMES.get(c, c),
                                 COLORS.get(c, "gray"), ylo=lo, yhi=hi,
                                 marker=MARKERS.get(c, "o"), size=4, group=c))
-            _mean_lines(p, g, avg_components.get(el, []), "u_fit")
+            _mean_lines(p, g, avg_components.get(el, []), col)
     return fig
 
 
 # ---- slow-component energy E(z): Poirier / linear / quadratic laws ---------------------
 FIT_STYLE = {"poirier": ("#1f4e9c", "solid"), "linear": ("#e07b1a", "dash"),
-             "quadratic": ("#7b3294", "dot")}
-FIT_NAMES = {"poirier": "A (z+1)^B (Poirier)", "linear": "linear", "quadratic": "quadratic"}
+             "quadratic": ("#7b3294", "dot"), "power": ("#1b7a5a", "dashdot")}
+FIT_NAMES = {"poirier": "A (z+1)^B (Poirier)", "linear": "linear", "quadratic": "quadratic",
+             "power": "A z^B (power law)"}
 
 
-def _fit_panel(p, z, E, lo=None, hi=None, label="slow"):
-    from ..slow_energy import PARAM_NAMES, curve, fit_models
+def _fit_panel(p, z, E, lo=None, hi=None, label="slow", models=None):
+    from ..slow_energy import LAWS_TIME, PARAM_NAMES, curve, fit_models
     from .spec import Line
     p.add(ErrorBars(np.asarray(z, float), np.asarray(E, float), label, COLORS["slow"],
                     ylo=lo, yhi=hi, marker="s", size=4, group="data"))
-    fits = fit_models(z, E)
+    fits = fit_models(z, E, models or LAWS_TIME)
     good = [f for f in fits if f.get("status") == "ok" and np.isfinite(f["AIC"])]
     best = min(good, key=lambda f: f["AIC"])["model"] if good else None
     zz = np.linspace(min(z), max(z), 200)
@@ -188,13 +192,14 @@ def _fit_panel(p, z, E, lo=None, hi=None, label="slow"):
         k += 1
 
 
-def slow_energy(pts, columns, labels: dict | None = None, elements=("Al", "Nb")) -> Figure:
-    """Slow component: E = m u²/2 per charge state with the three laws; rows = elements,
+def slow_energy(pts, columns, labels: dict | None = None, elements=("Al", "Nb"),
+                models=None, title="Slow component energy vs charge state",
+                bars: bool = True) -> Figure:
+    """Slow component: E = m u²/2 per charge state with the laws; rows = elements,
     columns = conditions. "best:" = lowest AIC."""
     n = max(len(columns), 1)
     fig = Figure(rows=len(elements), cols=n, size_in=(3.4 * n, 2.9 * len(elements)),
-                 height_px=380 * len(elements), letters=True, legend="figure",
-                 title="Slow component energy vs charge state")
+                 height_px=380 * len(elements), letters=True, legend="figure", title=title)
     for i, el in enumerate(elements):
         for j, mj in enumerate(columns):
             p = fig.panel(i, j)
@@ -205,19 +210,21 @@ def slow_energy(pts, columns, labels: dict | None = None, elements=("Al", "Nb"))
             if g.empty:
                 p.empty_text = "no slow component"
                 continue
-            _fit_panel(p, g.z.to_numpy(), g.E_eV.to_numpy(), g.E_lo_eV.to_numpy(),
-                       g.E_hi_eV.to_numpy())
+            _fit_panel(p, g.z.to_numpy(), g.E_eV.to_numpy(),
+                       g.E_lo_eV.to_numpy() if bars else None,
+                       g.E_hi_eV.to_numpy() if bars else None, models=models)
     return fig
 
 
-def slow_energy_literature(lit: dict) -> Figure:
-    """The same three laws on the published slow-component energies (check)."""
+def slow_energy_literature(lit: dict, models=None,
+                           title="Check: the laws on the published slow energies") -> Figure:
+    """The same laws on the published slow-component energies (check)."""
     n = max(len(lit), 1)
     fig = Figure(rows=1, cols=n, size_in=(3.6 * n, 3.0), height_px=420, letters=True,
-                 legend="figure", title="Check: the laws on the published slow energies")
+                 legend="figure", title=title)
     for j, (name, (z, E)) in enumerate(lit.items()):
         p = fig.panel(0, j)
         p.title, p.xlabel = name, Z_LABEL
         p.ylabel = lab(r"$E_{slow}$ (eV)", "E slow (eV)") if j == 0 else None
-        _fit_panel(p, z, E, label="published")
+        _fit_panel(p, z, E, label="published", models=models)
     return fig

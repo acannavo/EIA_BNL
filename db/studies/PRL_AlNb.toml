@@ -17,6 +17,12 @@ include_extra = false
 rows           = ["Al", "Nb"]
 column_energy_mJ = [180.0, 370.0, 780.0, 3.3]   # 3.3 mJ = the ps runs
 
+# velocity of a fitted CBS component (fit summary, slow-energy fit, collapse with
+# cbs_t_source = "fit"; run reports stay dN/dt): "dN/dt" = peak of the measured time-of-flight
+# shape (legacy), "dN/dv" / "dN/dE" = peak per unit velocity / energy, "mean" = mean
+# velocity. components.csv always holds all of them (u_dNdt, u_dNdv, u_dNdE, u_mean).
+peak_definition = "dN/dt"
+
 # components with a horizontal mean +/- std line (velocity figures)
 avg_components = { Al = ["fast", "ultra_fast"], Nb = ["fast"] }
 

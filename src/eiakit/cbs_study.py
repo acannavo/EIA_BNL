@@ -43,6 +43,9 @@ def run_components(db, run, data_root, areas: pd.DataFrame | None = None,
         areas = parse_cbs_areas(ap).table if ap else pd.DataFrame(columns=["z", "CBS"])
     names = run.cbs_names
     excl = (study.exclude.get(run.key, {}) if study is not None else {})
+    prof = db.profile_for(run, "cbs")
+    m_kg, e_C = db.mass_kg(run.target, prof), db.e_C(prof)
+    gamma = float(db.pipeline["cbs"].get("gamma", 5 / 3))
     a_idx = areas.set_index(["z", "CBS"]) if len(areas) else None
     rows = []
     for r in fit.table.itertuples():
@@ -59,6 +62,8 @@ def run_components(db, run, data_root, areas: pd.DataFrame | None = None,
                "u_pick": float(_u(L, r.t_peak_pick)), "u_left": float(_u(L, r.t_left_pick)),
                "u_right": float(_u(L, r.t_right_pick)), "t_peak_fit_us": float(r.t_peak_fit),
                "u_fit": float(_u(L, r.t_peak_fit))}
+        row.update(_peak_velocities(getattr(r, "kT_eV", np.nan), getattr(r, "V0_V", np.nan),
+                                    z, m_kg, e_C, gamma))
         if a_idx is not None and (z, n) in a_idx.index:
             ar = a_idx.loc[(z, n)]
             row["FWHM_fit_us"] = float(ar["FWHM_fit_us"])
@@ -66,6 +71,24 @@ def run_components(db, run, data_root, areas: pd.DataFrame | None = None,
         row["excluded"] = bool(z in excl.get("all", []) or z in excl.get(comp, []))
         rows.append(row)
     return pd.DataFrame(rows)
+
+
+def _peak_velocities(kT, V0, z, m_kg, e_C, gamma) -> dict:
+    """km/s of a fitted component: peak of dN/dt, dN/dv, dN/dE, mean velocity, and the
+    drift v_s of the shifted Maxwellian (NaN without kT / V0)."""
+    from .physics import cbs_density_peak_velocity, cbs_mean_velocity, shift_velocity
+    keys = ("u_dNdt", "u_dNdv", "u_dNdE", "u_mean", "v_shift")
+    try:
+        kT, V0 = float(kT), float(V0)
+    except (TypeError, ValueError):
+        return dict.fromkeys(keys, np.nan)
+    if not (np.isfinite(kT) and np.isfinite(V0) and kT > 0):
+        return dict.fromkeys(keys, np.nan)
+    pk = {d: float(cbs_density_peak_velocity(kT, V0, z, m_kg, e_C, d, gamma)) / 1e3
+          for d in ("t", "v", "E")}
+    return {"u_dNdt": pk["t"], "u_dNdv": pk["v"], "u_dNdE": pk["E"],
+            "u_mean": float(cbs_mean_velocity(kT, V0, z, m_kg, e_C, gamma)) / 1e3,
+            "v_shift": float(shift_velocity(kT, V0, z, m_kg, e_C, gamma)) / 1e3}
 
 
 def study_components(db, study_name, data_root, processed=None, source="legacy",

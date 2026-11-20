@@ -148,8 +148,11 @@ def cbs(db, study_name, data_root, processed, studies_root, source="pipeline",
         m = read_manifest(processed, db.run(key), STAGES["cbs"]) if source == "pipeline" \
             else None
         upstream[key] = m["run_id"] if m else f"legacy:{source}"
+    from .db import PEAK_DEFINITIONS
+    defcol = "u_fit" if st.peak_definition == "dN/dt" else PEAK_DEFINITIONS[st.peak_definition]
+    vcols = [c for c in ("u_dNdv", "u_dNdE", "u_mean") if c in tab]
     means = pd.concat([component_means(tab, st.avg_components, c, nan_aware=(c != "u_fit"))
-                       for c in ("u_peak", "u_pick", "u_fit")], ignore_index=True)
+                       for c in ("u_peak", "u_pick", "u_fit", *vcols)], ignore_index=True)
     tab.to_csv(out / "components.csv", index=False)
     means.to_csv(out / "component_means.csv", index=False)
     for r in means.itertuples():
@@ -169,30 +172,50 @@ def cbs(db, study_name, data_root, processed, studies_root, source="pipeline",
         mj = r.laser.energy_mJ
         if mj is not None and getattr(r.laser, "pulse", None):
             labels[float(mj)] = f"{mj:g} mJ ({r.laser.pulse})"
-    figs["fit_summary"] = cf.fit_summary(tab, st.avg_components, cols, "picks", labels)
-    figs["fit_summary_fwhm"] = cf.fit_summary(tab, st.avg_components, cols, "fit", labels)
-    # slow-component energy vs z: Poirier A (z+1)^B, linear, quadratic
-    from .slow_energy import fit_table, literature_points, slow_points
-    spts = slow_points(tab, db)
+    ylab = {"dN/dt": "Fit peak", "dN/dv": "dN/dv peak", "dN/dE": "dN/dE peak",
+            "mean": "Mean"}[st.peak_definition]
+    figs["fit_summary"] = cf.fit_summary(tab, st.avg_components, cols, "picks", labels,
+                                         defcol, ylab)
+    figs["fit_summary_fwhm"] = cf.fit_summary(tab, st.avg_components, cols, "fit", labels,
+                                              defcol, ylab)
+    # slow-component energy vs z: (1) from the study's peak definition, laws Poirier /
+    # linear / quadratic; (2) at the dN/dE peak (as Poirier), laws Poirier / linear / power
+    from .slow_energy import LAWS_ENERGY, LAWS_TIME, fit_table, literature_points, slow_points
+    spts = slow_points(tab, db, defcol)
     lit = literature_points(db.literature, st.collapse.literature if st.collapse else [])
-    sfit = fit_table(spts, lit)
+    sfit = fit_table(spts, lit, LAWS_TIME, st.peak_definition)
+    spts_E = slow_points(tab, db, "u_dNdE") if "u_dNdE" in tab else spts.iloc[0:0]
+    sfit_E = fit_table(spts_E, lit, LAWS_ENERGY, "dN/dE")
     spts.to_csv(out / "slow_energy_points.csv", index=False)
     sfit.to_csv(out / "slow_energy_fits.csv", index=False)
-    figs["slow_energy"] = cf.slow_energy(spts, cols, labels, tuple(st.rows))
+    spts_E.to_csv(out / "slow_energy_dNdE_points.csv", index=False)
+    sfit_E.to_csv(out / "slow_energy_dNdE_fits.csv", index=False)
+    figs["slow_energy"] = cf.slow_energy(
+        spts, cols, labels, tuple(st.rows), LAWS_TIME,
+        f"Slow component energy vs charge state ({st.peak_definition} peak)")
+    figs["slow_energy_dNdE"] = cf.slow_energy(
+        spts_E, cols, labels, tuple(st.rows), LAWS_ENERGY,
+        "Slow component: energy at the dN/dE peak vs charge state", bars=False)
     if lit:
         figs["slow_energy_literature"] = cf.slow_energy_literature(lit)
+        figs["slow_energy_dNdE_literature"] = cf.slow_energy_literature(
+            lit, LAWS_ENERGY, "Check: Poirier / linear / power law on the published energies")
+    sfit = pd.concat([sfit, sfit_E], ignore_index=True)
     for r in sfit[sfit.status == "ok"].itertuples():
         par = (f"A = {r.A:.4g} +/- {r.A_err:.2g}, B = {r.B:.3f} +/- {r.B_err:.3f}"
-               if r.model == "poirier" else
+               if r.model in ("poirier", "power") else
                ", ".join(f"{n} = {getattr(r, n):.4g}" for n in ("a", "b", "c")
                          if np.isfinite(getattr(r, n))))
-        log(f"  E_slow {r.dataset:<22} {r.model:<9} {par}  R2 = {r.R2:.4f}  "
+        log(f"  E_slow {r.peak:<5} {r.dataset:<22} {r.model:<9} {par}  R2 = {r.R2:.4f}  "
             f"AIC = {r.AIC:.1f}{'  <- best' if r.best_by_AIC else ''}")
     for name, f in figs.items():
         if formats:
             save(f, out / name, formats=formats)
     n_ex = int(tab.excluded.sum())
-    items = [("p", f"Study {study_name}, areas from: {source}. Component names from the db "
+    items = [("p", f"Velocity of a fitted component: {st.peak_definition} "
+                   "(study peak_definition; components.csv has all of u_dNdt, u_dNdv, "
+                   "u_dNdE, u_mean and the drift v_shift)."),
+             ("p", f"Study {study_name}, areas from: {source}. Component names from the db "
                    f"(legacy.cbs_components); {n_ex} (z, component) points excluded "
                    f"(study [exclude]). Velocities u = L/t with L from each fit-file header."),
              ("table", means, "mean +/- std of the averaged components")]
@@ -215,7 +238,16 @@ def cbs(db, study_name, data_root, processed, studies_root, source="pipeline",
               figs["slow_energy"]]
     if "slow_energy_literature" in figs:
         items.append(figs["slow_energy_literature"])
-    items.append(("table", shown, "fits of E_slow(z) (slow_energy_fits.csv)"))
+    items += [("h2", "Slow component: energy at the dN/dE peak (as Poirier et al.)"),
+              ("p", "The peak of the same ions counted per eV (Poirier et al. fit the maxima "
+                    "of dN_z/dE): from each fitted slow component (kT, V0), "
+                    "u = (v_s + sqrt(v_s² + 8 kT/m)) / 2, E = m u²/2. Fitted with "
+                    "A (z+1)^B (Poirier), a + b z and A z^B."),
+              figs["slow_energy_dNdE"]]
+    if "slow_energy_dNdE_literature" in figs:
+        items.append(figs["slow_energy_dNdE_literature"])
+    items.append(("table", shown, "fits of E_slow(z) (slow_energy_fits.csv, "
+                                  "slow_energy_dNdE_fits.csv)"))
     meta = (f"eiakit {__version__}, git {git_commit()}, {time.strftime('%Y-%m-%d %H:%M')}"
             f"; runs: {', '.join(st.all_runs())}")
     write_html_page(out / "cbs.html", f"{study_name}: CBS components", items, meta)
@@ -302,7 +334,8 @@ def collapse(db, study_name, data_root, processed, studies_root, source="pipelin
         pk.append(C.eia_peaks(ds, cs.peak_min_prom_frac, cs.peak_err_mode))
     peaks = {"eia": C.drop_excluded(pd.concat(pk, ignore_index=True), st.exclude),
              "cbs": C.drop_excluded(pd.concat([C.cbs_peaks(db, db.run(k), data_root,
-                                                           cs.cbs_t_source)
+                                                           cs.cbs_t_source,
+                                                           st.peak_definition)
                                                for k in st.runs], ignore_index=True),
                                     st.exclude)}
     prof = {k: db.profile_for(db.run(k), "analysis") for k in st.runs}
